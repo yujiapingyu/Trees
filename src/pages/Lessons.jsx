@@ -51,7 +51,7 @@ import {
   Markdown,
 } from "../components/UI";
 import { ResourcePicker } from "../components/FileBrowser";
-import { renderPDF } from "../shared/questionPipeline";
+import { renderPDF } from "../shared/documents";
 function Tools({ kind, lesson, files, onClose, onRefresh }) {
   const { data, config, mutate, run, notify } = useApp();
   const { files: templates } = useFiles(config.templatesRoot);

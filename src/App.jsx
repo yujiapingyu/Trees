@@ -26,7 +26,7 @@ import WrongQuestions from "./pages/WrongQuestions";
 import Resources from "./pages/Resources";
 import Videos from "./pages/Videos";
 import Lessons from "./pages/Lessons";
-import QuestionBank from "./pages/QuestionBank";
+import Exams from "./pages/Exams";
 import Settings from "./pages/Settings";
 export const NAV = [
   ["students", "学生管理", Users],
@@ -36,7 +36,7 @@ export const NAV = [
   ["teachingResources", "教学资源", Library],
   ["teachingVideos", "教学视频", Video],
   ["lessonLibrary", "讲义库", BookOpen],
-  ["questionBank", "题库管理", LayoutGrid],
+  ["exams", "考试管理", LayoutGrid],
   ["settings", "配置中心", Settings2],
 ];
 const shortcuts = [
@@ -144,7 +144,7 @@ export default function App() {
     teachingResources: <Resources />,
     teachingVideos: <Videos />,
     lessonLibrary: <Lessons />,
-    questionBank: <QuestionBank />,
+    exams: <Exams />,
     settings: <Settings />,
     books: <Resources books />,
   };

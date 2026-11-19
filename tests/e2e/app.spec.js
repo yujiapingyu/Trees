@@ -7,7 +7,7 @@ const names = [
   "教学资源",
   "教学视频",
   "讲义库",
-  "题库管理",
+  "考试管理",
   "配置中心",
 ];
 test("9 个入口与真实空状态可打开；路由和快捷键恢复", async ({ page }) => {
@@ -25,7 +25,7 @@ test("9 个入口与真实空状态可打开；路由和快捷键恢复", async 
       .click();
     await expect(
       page.getByRole("heading", {
-        name: name === "题库管理" ? "数学题库" : name,
+        name: name,
         exact: true,
       }),
     ).toBeVisible();

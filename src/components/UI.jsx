@@ -247,12 +247,19 @@ export function Confirm({
     </Modal>
   );
 }
-export function CopyButton({ text, label = "复制" }) {
+export function CopyButton({
+  text,
+  label = "复制",
+  ariaLabel = label,
+  disabled = false,
+}) {
   const { run } = useApp();
   const [done, setDone] = useState(false);
   return (
     <Button
       icon={done ? Check : Copy}
+      aria-label={ariaLabel}
+      disabled={disabled}
       onClick={() =>
         run(async () => {
           await navigator.clipboard.writeText(text);

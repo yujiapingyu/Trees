@@ -4,7 +4,6 @@ import {
   addDays,
   followupState,
   validateName,
-  validatePair,
   validateBlank,
   validateQuestions,
   studentMatches,
@@ -50,13 +49,6 @@ test("名称唯一且阻止路径注入", () => {
     validateName(" 张三 ", [{ id: "1", name: "张三" }], "1"),
     "张三",
   );
-});
-test("双文件配对不接受缺失或同一文件", () => {
-  validatePair("original", "a.docx");
-  validatePair("paired", "a.pdf", "a-答案.doc");
-  assert.throws(() => validatePair("paired", "a.pdf"));
-  assert.throws(() => validatePair("paired", "a.pdf", "a.pdf"));
-  assert.throws(() => validatePair("original", "a.exe"));
 });
 test("空白系数、难度与题干校验", () => {
   validateBlank(0.1, 0.5);

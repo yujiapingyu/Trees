@@ -215,6 +215,7 @@ export function AppProvider({ children }) {
           "followups",
           "wrongQuestions",
           "reports",
+          "examRecords",
         ])
           d[k] = d[k].filter((x) =>
             k === "students" ? x.id !== student.id : x.studentId !== student.id,

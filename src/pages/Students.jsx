@@ -36,6 +36,7 @@ import { isWithinRoot, studentDirectoryState } from "../shared/paths";
 import { useCourses, useFiles, useLessonIndex } from "../shared/hooks";
 import StudentList, { Avatar } from "../components/StudentList";
 import SchoolManager from "../components/SchoolManager";
+import StudentExams from "../components/StudentExams";
 import {
   SCHOOL_STAGES,
   schoolForStudent,
@@ -767,6 +768,7 @@ export default function Students({ navigate }) {
                   { key: "homework", label: "作业 " + count("homework") },
                   { key: "feedback", label: "课堂反馈" },
                   { key: "wrong", label: "错题" },
+                  { key: "exams", label: "考试成绩" },
                   { key: "reports", label: "学习报告" },
                   { key: "analysis", label: "学情分析" },
                 ]}
@@ -820,6 +822,7 @@ export default function Students({ navigate }) {
                 {view.tab === "overview" && (
                   <CourseFiles course={course} student={student} />
                 )}
+                {view.tab === "exams" && <StudentExams student={student} />}
                 {view.tab === "homework" && <HomeworkPanel student={student} />}
                 {view.tab === "feedback" && (
                   <FeedbackPanel
@@ -930,7 +933,7 @@ export default function Students({ navigate }) {
           title="删除学生"
           name={student.name}
           description={
-            "学生目录将移入系统废纸篓；同时清除该学生的档案、作业、反馈、回访、笔记、错题与报告索引。讲义库原件保留。目录：" +
+            "学生目录将移入系统废纸篓；同时清除该学生的档案、作业、反馈、回访、笔记、错题、考试成绩与报告索引。讲义库原件保留。目录：" +
             student.directoryPath
           }
           onClose={() => setModal(null)}

@@ -36,7 +36,7 @@ export const PATH_GROUPS = [
       ["studentsRoot", "学生根目录"],
       ["lessonsRoot", "个人讲义库目录"],
       ["templatesRoot", "DOC / DOCX 模板目录"],
-      ["questionBankRoot", "题库保存目录"],
+      ["examsRoot", "考试资料根目录"],
       ["feedbackTemplate", "微信群反馈模板文件", "file"],
     ],
   },
