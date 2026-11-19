@@ -1,0 +1,49 @@
+{
+  "name": "teaching-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "desktop": "npm run build && electron .",
+    "desktop:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env TEACHING_DEV=1 electron .\"",
+    "test": "node --test tests/*.test.*",
+    "test:e2e": "playwright test",
+    "check": "npm run test && npm run build"
+  },
+  "dependencies": {
+    "docx": "^9.5.0",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "katex": "^0.19.1",
+    "lucide-react": "^0.468.0",
+    "mammoth": "^1.11.0",
+    "pdfjs-dist": "^6.5.438",
+    "pinyin-pro": "^3.27.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@vitejs/plugin-react": "^5.1.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^45.3.3",
+    "vite": "^7.2.0",
+    "wait-on": "^9.0.3",
+    "prettier": "^3.6.2"
+  },
+  "overrides": {
+    "katex": "^0.19.1",
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
+  }
+}
