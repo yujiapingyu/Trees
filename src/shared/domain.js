@@ -68,9 +68,15 @@ export function matches(value, query) {
       .includes(q)
   );
 }
-export function studentMatches(student, q) {
+export function studentMatches(student, q, schools = []) {
   return matches(
-    [student.name, student.grade, student.phone, student.notes].join(" "),
+    [
+      student.name,
+      student.grade,
+      student.phone,
+      student.notes,
+      schools.find((s) => s.id === student.schoolId)?.name || "",
+    ].join(" "),
     q,
   );
 }
@@ -93,16 +99,6 @@ export function validateName(name, students = [], excludeId) {
   )
     throw Error("该名称已存在，请使用其他名称");
   return n;
-}
-export function validateImages(files, count = 0) {
-  if (count + files.length > 8) throw Error("最多添加 8 张图片");
-  for (const f of files) {
-    if (
-      !["image/jpeg", "image/png", "image/gif", "image/webp"].includes(f.type)
-    )
-      throw Error("仅支持 JPEG、PNG、GIF、WebP 图片");
-    if (f.size > 32 * 1024 * 1024) throw Error("单张图片不能超过 32 MiB");
-  }
 }
 export function validatePair(mode, original, answer) {
   if (!original) throw Error("请选择原试题文件");
@@ -175,7 +171,11 @@ export function removeRef(refs, lessonId, feedback) {
 export function safeStudentContext(student, data) {
   const take = (key) => data[key].filter((x) => x.studentId === student.id);
   return {
-    student,
+    student: {
+      ...student,
+      school:
+        (data.schools || []).find((s) => s.id === student.schoolId)?.name || "",
+    },
     lessons: take("refs"),
     homework: take("homework"),
     feedback: take("feedback").slice(-10),
@@ -213,6 +213,7 @@ export function timeFilter(items, range, now = today(), n = 5) {
   );
 }
 export const EMPTY_DATA = {
+  schools: [],
   students: [],
   lessons: [],
   refs: [],
@@ -229,17 +230,3 @@ export const EMPTY_DATA = {
   favorites: [],
   recent: [],
 };
-export function recordingTransition(state, event) {
-  const map = {
-    idle: { start: "recording" },
-    recording: { stop: "saving", cancel: "idle" },
-    saving: { saved: "transcribing", error: "error" },
-    transcribing: { done: "summarizing", error: "error" },
-    summarizing: { done: "done", error: "error" },
-    error: { retry: "transcribing", start: "recording" },
-    done: { start: "recording" },
-  };
-  const next = map[state]?.[event];
-  if (!next) throw Error(`录音状态不允许 ${state} → ${event}`);
-  return next;
-}

@@ -7,12 +7,10 @@ const names = [
   "教学资源",
   "教学视频",
   "讲义库",
-  "视觉实验",
-  "试卷分析",
   "题库管理",
   "配置中心",
 ];
-test("11 个入口与真实空状态可打开；路由和快捷键恢复", async ({ page }) => {
+test("9 个入口与真实空状态可打开；路由和快捷键恢复", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
@@ -94,13 +92,41 @@ test("小窗口布局可访问，导航可横向滚动", async ({ page }) => {
     ),
   ).toBe(true);
 });
-test("图片限制与缺少模型配置有明确错误", async ({ page }) => {
+test("移除模块的旧路由会回到学生页，过期配置不会继续生效", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("sm_view_state_route", JSON.stringify("visionDemo"));
+    localStorage.setItem(
+      "sm_path_config_v1",
+      JSON.stringify({
+        deepseekKey: "existing-test-key",
+        qwenKey: "retired-key",
+        whisperPath: "/retired/tool",
+        deepseekVisionModel: "retired-model",
+      }),
+    );
+  });
   await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "学生管理", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("navigation").getByRole("button", { name: "视觉实验" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("navigation").getByRole("button", { name: "试卷分析" }),
+  ).toHaveCount(0);
+  const config = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("sm_path_config_v1")),
+  );
+  expect(config).toEqual({ deepseekKey: "existing-test-key" });
   await page
     .getByRole("navigation")
-    .getByRole("button", { name: "视觉实验" })
+    .getByRole("button", { name: "配置中心" })
     .click();
-  await page.getByLabel("公开图片 URL").fill("http://localhost/private.png");
-  await page.getByRole("button", { name: "添加图片链接" }).click();
-  await expect(page.getByRole("status")).toContainText("公开 HTTP(S)");
+  await expect(
+    page.getByRole("button", { name: "学校管理", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "语音与文档", exact: true }),
+  ).toHaveCount(0);
 });

@@ -42,7 +42,14 @@ import { ResourcePicker } from "./FileBrowser";
 import { AIAction } from "./AIPanel";
 import { useFiles } from "../shared/hooks";
 import { studentDirectoryState } from "../shared/paths";
-import Recording from "./Recording";
+import { schoolNameForStudent } from "../shared/schools";
+import { readLessonDocuments } from "../shared/documents";
+import {
+  feedbackDate,
+  feedbackPrompt,
+  formatFeedback,
+  localFeedback,
+} from "../shared/feedback";
 export function HomeworkPanel({ student }) {
   const { data, mutate, run } = useApp();
   const items = data.homework.filter((x) => x.studentId === student.id);
@@ -199,70 +206,116 @@ export function HomeworkPanel({ student }) {
   );
 }
 export function FeedbackPanel({ student, courses, course }) {
-  const { data, config, mutate, run, notify } = useApp();
+  const { data, config, mutate, run } = useApp();
   const [lessonId, setLesson] = useState(course?.id || ""),
+    [classDate, setClassDate] = useState(today()),
     [input, setInput] = useState(""),
     [draft, setDraft] = useState(""),
     [model, setModel] = useState(""),
     [editing, setEditing] = useState(null),
-    [recordingMeta, setRecordingMeta] = useState({}),
-    [remove, setRemove] = useState(null);
+    [remove, setRemove] = useState(null),
+    [generating, setGenerating] = useState(false),
+    [sourceFiles, setSourceFiles] = useState([]);
   const stopped = student.status === "已停课";
   const history = data.feedback
     .filter((f) => f.studentId === student.id)
     .sort((a, b) => b.date.localeCompare(a.date));
-  const task = async () => {
-    if (!input.trim()) throw Error("请先输入本节课表现、掌握情况或建议");
-    let template = "";
-    if (config.feedbackTemplate)
-      template = await services.readText(config.feedbackTemplate);
-    return `依据学生档案与本节课记录生成适合微信群发给家长的反馈，不编造事实。\n学生：${JSON.stringify(student)}\n课程：${courses.find((c) => c.id === lessonId)?.name || "未指定"}\n课堂事实：${input}\n反馈模板：${template}`;
-  };
+  const generateDraft = () =>
+    run(async () => {
+      setGenerating(true);
+      try {
+        if (!config.deepseekKey)
+          throw Error("请先在配置中心设置 DeepSeek API Key");
+        feedbackDate(classDate);
+        if (!input.trim()) throw Error("请先输入本节课记录");
+        const lesson = courses.find((c) => c.id === lessonId);
+        if (!lesson) throw Error("请选择关联讲义，AI 将从讲义正文提取授课内容");
+        const documents = await readLessonDocuments(lesson);
+        const template = config.feedbackTemplate
+          ? await services.readText(config.feedbackTemplate)
+          : "";
+        const result = await generate(
+          feedbackPrompt({
+            student,
+            date: classDate,
+            notes: input,
+            lesson,
+            documents,
+            template,
+            school: schoolNameForStudent(student, data),
+          }),
+          { json: true },
+        );
+        const text = formatFeedback(parseJSONResult(result.text), {
+          student,
+          date: classDate,
+        });
+        setDraft(text);
+        setModel(result.model);
+        setSourceFiles(documents.map(({ path, name }) => ({ path, name })));
+      } finally {
+        setGenerating(false);
+      }
+    });
   return (
-    <Section title="课堂反馈" subtitle="先记录课堂事实，再整理给家长的反馈">
-      <div className="form-grid">
+    <Section
+      title="课堂反馈"
+      subtitle="日期默认今天；AI 从讲义提取授课内容，结合教师记录扩写家长反馈"
+    >
+      <div className="form-grid two">
+        <Field label="上课日期">
+          <input
+            type="date"
+            disabled={stopped || generating}
+            value={classDate}
+            onChange={(e) => setClassDate(e.target.value)}
+          />
+        </Field>
         <Field label="关联讲义">
           <select
             value={lessonId}
+            disabled={stopped || generating}
             onChange={(e) => setLesson(e.target.value)}
-            disabled={stopped}
           >
-            <option value="">不关联讲义</option>
+            <option value="">请选择讲义</option>
             {courses.map((c) => (
-              <option key={c.id} value={c.id}>
+              <option key={c.id} value={c.id} disabled={c.missing}>
                 {c.name}
+                {c.missing ? "（路径失效）" : ""}
               </option>
             ))}
           </select>
         </Field>
-        <Field label="本节课记录">
-          <textarea
-            disabled={stopped}
-            rows={4}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="课堂表现、知识掌握、薄弱点、课后建议…"
-          />
-        </Field>
       </div>
-      <div className="button-row">
-        <AIAction
-          label="AI 整理家长反馈"
-          disabled={stopped}
-          task={task}
-          onResult={(v, m) => {
-            setDraft(v);
-            setModel(m);
-          }}
+      <Field label="本节课记录">
+        <textarea
+          rows={5}
+          value={input}
+          disabled={stopped || generating}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="填写你观察到的表现、优点、薄弱点和建议。AI 将结合讲义正文，扩写为优点和不足各 2–3 条。"
         />
+      </Field>
+      <div className="button-row">
         <Button
-          disabled={stopped || !input.trim()}
-          onClick={() => {
-            setModel("本地模板 / 非 AI 生成");
-            setDraft(
-              `家长您好，这是${student.name}本次课的学习反馈：\n\n${input}\n\n如有问题，欢迎随时沟通。`,
-            );
-          }}
+          icon={Sparkles}
+          busy={generating}
+          disabled={stopped}
+          onClick={generateDraft}
+        >
+          AI 整理家长反馈
+        </Button>
+        <Button
+          disabled={stopped || generating || !input.trim()}
+          onClick={() =>
+            run(async () => {
+              setDraft(
+                localFeedback({ student, date: classDate, notes: input }),
+              );
+              setModel("本地模板 / 非 AI 生成");
+              setSourceFiles([]);
+            })
+          }
         >
           使用本地模板
         </Button>
@@ -270,46 +323,46 @@ export function FeedbackPanel({ student, courses, course }) {
       {draft && (
         <>
           <Badge type={model.includes("非 AI") ? "warning" : "blue"}>
-            {model || "录音整理草稿"}
+            {model || "手动编辑草稿"}
           </Badge>
-          <Editor value={draft} onChange={setDraft} />
+          {sourceFiles.length > 0 && (
+            <p className="form-hint">
+              授课内容来源：{sourceFiles.map((f) => f.name).join("、")}
+            </p>
+          )}
+          <Editor value={draft} onChange={setDraft} rows={16} />
           <div className="button-row">
             <CopyButton text={draft} />
             <Button
-              variant="primary"
               icon={Save}
-              disabled={stopped}
+              variant="primary"
+              disabled={stopped || generating}
               onClick={() =>
                 run(async () => {
+                  feedbackDate(classDate);
+                  if (!draft.trim()) throw Error("反馈内容不能为空");
+                  const values = {
+                    content: draft,
+                    lessonId,
+                    date: classDate,
+                    teacherNotes: input,
+                    sourceFiles,
+                    model,
+                  };
                   await mutate((d) => ({
                     ...d,
                     feedback: editing
                       ? d.feedback.map((f) =>
-                          f.id === editing
-                            ? {
-                                ...f,
-                                ...recordingMeta,
-                                content: draft,
-                                lessonId,
-                              }
-                            : f,
+                          f.id === editing ? { ...f, ...values } : f,
                         )
                       : [
                           ...d.feedback,
-                          {
-                            id: id(),
-                            studentId: student.id,
-                            lessonId,
-                            date: today(),
-                            content: draft,
-                            ...recordingMeta,
-                            model,
-                          },
+                          { id: id(), studentId: student.id, ...values },
                         ],
                   }));
                   setDraft("");
                   setEditing(null);
-                  setRecordingMeta({});
+                  setSourceFiles([]);
                 }, "反馈已保存")
               }
             >
@@ -318,16 +371,6 @@ export function FeedbackPanel({ student, courses, course }) {
           </div>
         </>
       )}
-      <Recording
-        key={student.id}
-        student={student}
-        kind="class"
-        onDraft={(v, meta) => {
-          setDraft(v);
-          setRecordingMeta(meta);
-          setModel("录音转写 / AI 草稿");
-        }}
-      />
       <h4 className="subheading">
         历史反馈 <span>{history.length}</span>
       </h4>
@@ -347,16 +390,23 @@ export function FeedbackPanel({ student, courses, course }) {
             <div className="button-row">
               <CopyButton text={f.content} />
               <Button
-                disabled={stopped}
+                disabled={stopped || generating}
                 onClick={() => {
                   setEditing(f.id);
                   setDraft(f.content);
-                  setLesson(f.lessonId);
+                  setLesson(f.lessonId || "");
+                  setClassDate(f.date || today());
+                  setInput(f.teacherNotes || "");
+                  setSourceFiles(f.sourceFiles || []);
+                  setModel(f.model || "已保存反馈");
                 }}
               >
                 编辑
               </Button>
-              <Button disabled={stopped} onClick={() => setRemove(f)}>
+              <Button
+                disabled={stopped || generating}
+                onClick={() => setRemove(f)}
+              >
                 删除
               </Button>
             </div>
@@ -618,7 +668,7 @@ export function ReportPanel({ student }) {
   const [form, setForm] = useState({
       type: "入学报告",
       subject: "数学",
-      school: "",
+      school: schoolNameForStudent(student, data),
       score: "",
       target: "",
       targetSchool: "",

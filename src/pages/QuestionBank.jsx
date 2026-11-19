@@ -106,9 +106,8 @@ export default function QuestionBank() {
       validateName(form.name);
       validatePair(form.mode, form.original, form.answer);
       if (!config.questionBankRoot) throw Error("请先配置题库根目录");
-      if (!config.qwenKey || !config.deepseekKey)
-        throw Error("请先配置千问与 DeepSeek API Key");
-      stageRef.current = "读取文档与转换页面";
+      if (!config.deepseekKey) throw Error("请先配置 DeepSeek API Key");
+      stageRef.current = "读取试卷正文";
       setStage(stageRef.current);
       const result = await importBank({
         form: { ...form, root: config.questionBankRoot },
@@ -364,6 +363,15 @@ export default function QuestionBank() {
                         "\n\n" +
                         (q.explanation || "暂无解析")}
                     </Markdown>
+                    {q.sourceDocument && (
+                      <Button
+                        onClick={() =>
+                          run(() => services.open(q.sourceDocument))
+                        }
+                      >
+                        查看原始试卷
+                      </Button>
+                    )}
                     {q.sourceImage && (
                       <Button
                         onClick={() => run(() => services.open(q.sourceImage))}
@@ -437,8 +445,9 @@ export default function QuestionBank() {
             </Field>
           ))}
           <div className="info-banner">
-            逐页转图 → 千问识别 → 跨页合并 / 答案配对 → DeepSeek 分类 → 本地
-            JSON 与图片。DOC / DOCX 转图需 LibreOffice；不确定内容会标记待校对。
+            读取文字正文 → DeepSeek 提取题目 → 配对答案 → 分类 → 本地 JSON。支持
+            DOC / DOCX 和有文字层的
+            PDF；扫描件需先转为文字版，题目图形请人工核对。
           </div>
           {stage && <Progress stage={stage} />}
           {error && <ErrorBox message={error} />}

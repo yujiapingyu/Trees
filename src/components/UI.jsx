@@ -158,6 +158,8 @@ export function Modal({ title, children, onClose, wide = false }) {
       );
     focusable()[0]?.focus();
     const handle = (e) => {
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs[dialogs.length - 1] !== ref.current) return;
       if (e.key === "Escape") onClose();
       if (e.key === "Tab") {
         const list = focusable(),

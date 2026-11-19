@@ -17,6 +17,7 @@ import {
   RefreshCw,
   Save,
 } from "lucide-react";
+import { addLessonReference } from "../shared/lessonReferences";
 import { useApp, useView } from "../shared/store";
 import { useLessonIndex, useFiles } from "../shared/hooks";
 import {
@@ -753,19 +754,9 @@ function Detail({ lesson, onTool, onRefresh }) {
                         data.refs.filter((r) => r.studentId === s.id),
                         lesson.id,
                       );
-                      await mutate((d) => {
-                        uniqueRef(
-                          d.refs.filter((r) => r.studentId === s.id),
-                          lesson.id,
-                        );
-                        return {
-                          ...d,
-                          refs: [
-                            ...d.refs,
-                            { id: id(), studentId: s.id, lessonId: lesson.id },
-                          ],
-                        };
-                      });
+                      await mutate((d) =>
+                        addLessonReference(d, s.id, lesson.id),
+                      );
                     })
                   }
                 >

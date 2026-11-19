@@ -1,4 +1,12 @@
 import { EMPTY_DATA, id } from "./domain.js";
+import configKeys from "./configKeys.json" with { type: "json" };
+export function sanitizeConfig(value = {}) {
+  return Object.fromEntries(
+    [...configKeys.roots, ...configKeys.extras]
+      .filter((key) => typeof value[key] === "string")
+      .map((key) => [key, value[key]]),
+  );
+}
 export const desktop = !!window.services;
 const unavailable = async () => {
   throw Error(
@@ -19,15 +27,12 @@ export const services =
       "copy",
       "pick",
       "readText",
-      "readBytes",
       "sheet",
       "pdf",
       "word",
       "writeJSON",
-      "writeBytes",
       "ai",
       "cancelAI",
-      "transcribe",
       "volumes",
       "mediaURL",
     ].map((k) => [k, unavailable]),
@@ -55,9 +60,16 @@ export const storage = {
         data: { ...structuredClone(EMPTY_DATA), ...(result.data || {}) },
       };
     }
+    const oldConfig = await this.get("sm_path_config_v1", {}),
+      config = sanitizeConfig(oldConfig);
+    if (JSON.stringify(config) !== JSON.stringify(oldConfig))
+      await this.set("sm_path_config_v1", config);
     return {
-      config: await this.get("sm_path_config_v1", {}),
-      data: await this.get("sm_workspace_v1", structuredClone(EMPTY_DATA)),
+      config,
+      data: {
+        ...structuredClone(EMPTY_DATA),
+        ...(await this.get("sm_workspace_v1", {})),
+      },
     };
   },
 };
@@ -70,26 +82,5 @@ export const basename = (p) => p?.split(/[\\/]/).filter(Boolean).at(-1) || "";
 export function parent(p) {
   return p.slice(0, p.lastIndexOf("/")) || "/";
 }
-export function download(name, text, type = "text/plain") {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([text], { type }));
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-export async function fileDataURL(file) {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result);
-    r.onerror = () => rej(Error("文件读取失败"));
-    r.readAsDataURL(file);
-  });
-}
 export const fromBase64 = (s) =>
   Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-export const toBase64 = (bytes) => {
-  let value = "";
-  for (let i = 0; i < bytes.length; i += 8192)
-    value += String.fromCharCode(...bytes.subarray(i, i + 8192));
-  return btoa(value);
-};

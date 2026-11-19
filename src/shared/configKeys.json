@@ -1,0 +1,27 @@
+{
+  "roots": [
+    "studentsRoot",
+    "lessonsRoot",
+    "templatesRoot",
+    "questionBankRoot",
+    "referenceJunior",
+    "referenceSenior",
+    "referenceVocational",
+    "textbooksJunior",
+    "textbooksSenior",
+    "exercisesJunior",
+    "exercisesSenior",
+    "planningJunior",
+    "planningSenior",
+    "videosRoot",
+    "booksRoot",
+    "usbRoot"
+  ],
+  "extras": [
+    "feedbackTemplate",
+    "libreofficePath",
+    "deepseekKey",
+    "deepseekHost",
+    "deepseekModel"
+  ]
+}

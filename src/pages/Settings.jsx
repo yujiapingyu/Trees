@@ -9,7 +9,7 @@ import {
   CheckCircle2,
   HardDrive,
   BookOpen,
-  Mic,
+  School,
   Library,
   FolderTree,
   Info,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useApp, useView } from "../shared/store";
 import { services } from "../shared/services";
+import SchoolManager from "../components/SchoolManager";
 import {
   PageHeader,
   Button,
@@ -40,19 +41,18 @@ export const PATH_GROUPS = [
     ],
   },
   {
-    key: "speech",
-    label: "语音与文档",
-    icon: Mic,
-    description: "本地转写与文档转换工具",
-    fields: [
-      ["classAudioRoot", "课堂录音目录"],
-      ["followupAudioRoot", "回访录音目录"],
-      ["whisperPath", "whisper-cli 可执行文件", "file"],
-      ["whisperModel", "Whisper 模型文件", "file"],
-      ["whisperLanguage", "识别语言", "text"],
-      ["ffmpegPath", "FFmpeg 可执行文件", "file"],
-      ["libreofficePath", "LibreOffice 可执行文件", "file"],
-    ],
+    key: "schools",
+    label: "学校管理",
+    icon: School,
+    description: "按初中、高中管理自定义学校，供学生档案关联",
+    fields: [],
+  },
+  {
+    key: "documents",
+    label: "文档转换",
+    icon: FolderTree,
+    description: "本地 Word 文档读取与转换工具",
+    fields: [["libreofficePath", "LibreOffice 可执行文件", "file"]],
   },
   {
     key: "reference",
@@ -99,12 +99,6 @@ export const PATH_GROUPS = [
       ["deepseekKey", "DeepSeek API Key", "secret"],
       ["deepseekHost", "文本服务地址", "text"],
       ["deepseekModel", "文本模型名称", "text"],
-      ["deepseekVisionHost", "视觉服务地址（兼容接口）", "text"],
-      ["deepseekVisionModel", "视觉模型名称", "text"],
-      ["qwenKey", "千问 API Key", "secret"],
-      ["qwenHost", "千问兼容服务地址", "text"],
-      ["qwenModel", "千问文本模型", "text"],
-      ["qwenVisionModel", "千问视觉模型", "text"],
     ],
   },
   {
@@ -118,9 +112,6 @@ export const PATH_GROUPS = [
 const defaults = {
   deepseekHost: "https://api.deepseek.com",
   deepseekModel: "deepseek-chat",
-  qwenHost: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  qwenVisionModel: "qwen-vl-max",
-  whisperLanguage: "zh",
 };
 export default function Settings() {
   const { config, saveConfig, run, desktop } = useApp();
@@ -132,6 +123,9 @@ export default function Settings() {
     [volumes, setVolumes] = useState([]);
   useEffect(() => setDraft({ ...defaults, ...config }), [config]);
   const group = PATH_GROUPS.find((g) => g.key === tab) || PATH_GROUPS[0];
+  useEffect(() => {
+    if (!PATH_GROUPS.some((g) => g.key === tab)) setTab("student");
+  }, [tab]);
   const set = (key, value) => setDraft((v) => ({ ...v, [key]: value }));
   const check = async (key) => {
     if (!draft[key] || !desktop) return;
@@ -171,23 +165,27 @@ export default function Settings() {
             <h2>{group.label}</h2>
             <p>{group.description}</p>
           </div>
-          {group.key === "guide" ? (
-            <Markdown>{`### 建议目录结构\n\n\`\`\`text\n教培资料/\n  学生分类/张三/函数复习/教案.docx\n                学习力报告/\n                错题本/\n  个人讲义库/初中/初一/一元一次方程/\n            高中/高一/\n            中职/\n  讲义模板/\n  参考资料/初中/\n  课本/初中/\n  分层规划/初中/规划.xlsx\n  视频/\n  书籍/\n  试卷库/\n  课堂录音/\n  回访录音/\n\`\`\`\n\n学生根目录下的一级文件夹代表学生。学生内一级目录代表课程，学习力报告、错题本、续费管理等特殊目录除外。文件夹请避免同名；删除进入系统废纸篓。\n\n规划表支持 XLSX、CSV；旧 XLS 请先转换。DOC 与 Word 转 PDF 需要 LibreOffice。录音转写需要 FFmpeg、whisper-cli 与 Whisper 模型。所有工具路径均可配置。\n\n浏览器可保存轻量记录与配置；本地文件、AI 密钥请求与文档转换需要桌面模式。使用项目命令 npm run desktop 启动。`}</Markdown>
+          {group.key === "schools" ? (
+            <SchoolManager />
+          ) : group.key === "guide" ? (
+            <Markdown>{`### 建议目录结构
+
+学生根目录 / 学生姓名 / 课程名称 / 教案.docx
+
+讲义根目录 / 初中或高中 / 年级 / 讲义名称 / 教案.docx
+
+学生目录中的“学习力报告”“错题本”“续费管理”不会识别成课程。
+
+规划表支持 XLSX / CSV。DOC 正文、Word 转 PDF 和学案分页预览需要 LibreOffice。
+
+学校在“学校管理”中按初中、高中自行添加，再在学生档案选择关联。
+
+浏览器可保存轻量记录；本地文件、DeepSeek 请求及文档转换需要桌面版。使用 npm run desktop 启动。`}</Markdown>
           ) : (
             <>
               <div className="settings-fields">
                 {group.fields.map(([key, label, type]) => (
-                  <Field
-                    key={key}
-                    label={label}
-                    hint={
-                      key === "deepseekVisionModel"
-                        ? "请配置实际支持视觉的模型；默认 DeepSeek 文本模型不接受图片。"
-                        : key === "deepseekVisionHost"
-                          ? "可使用用户指定的 OpenAI 兼容视觉服务，凭据沿用 DeepSeek Key。"
-                          : null
-                    }
-                  >
+                  <Field key={key} label={label}>
                     <div className="path-input">
                       <input
                         type={

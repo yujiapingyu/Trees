@@ -7,8 +7,6 @@ import {
   Library,
   Video,
   BookOpen,
-  ScanEye,
-  Files,
   LayoutGrid,
   Settings2,
   GraduationCap,
@@ -28,8 +26,6 @@ import WrongQuestions from "./pages/WrongQuestions";
 import Resources from "./pages/Resources";
 import Videos from "./pages/Videos";
 import Lessons from "./pages/Lessons";
-import Vision from "./pages/Vision";
-import ExamAnalysis from "./pages/ExamAnalysis";
 import QuestionBank from "./pages/QuestionBank";
 import Settings from "./pages/Settings";
 export const NAV = [
@@ -40,8 +36,6 @@ export const NAV = [
   ["teachingResources", "教学资源", Library],
   ["teachingVideos", "教学视频", Video],
   ["lessonLibrary", "讲义库", BookOpen],
-  ["visionDemo", "视觉实验", ScanEye],
-  ["examAnalysis", "试卷分析", Files],
   ["questionBank", "题库管理", LayoutGrid],
   ["settings", "配置中心", Settings2],
 ];
@@ -128,6 +122,10 @@ export default function App() {
   useEffect(() => {
     if (!loading && desktop && config.studentsRoot) run(syncStudents);
   }, [loading, config.studentsRoot]);
+  useEffect(() => {
+    if (!loading && !NAV.some(([key]) => key === route) && route !== "books")
+      setRoute("students");
+  }, [route, loading]);
   if (loading) return <Loading text="正在打开本地教学工作区…" />;
   if (fatal)
     return (
@@ -146,8 +144,6 @@ export default function App() {
     teachingResources: <Resources />,
     teachingVideos: <Videos />,
     lessonLibrary: <Lessons />,
-    visionDemo: <Vision />,
-    examAnalysis: <ExamAnalysis />,
     questionBank: <QuestionBank />,
     settings: <Settings />,
     books: <Resources books />,
@@ -239,7 +235,7 @@ export default function App() {
       </div>
       {help && (
         <Modal title="欢迎使用知序" onClose={() => setHelp(false)}>
-          <Markdown>{`这是一个本地优先的教培工作台。\n\n1. 在配置中心选择学生、讲义与教学资源根目录。\n2. 学生文件夹自动扫描为档案，也可以直接新增。\n3. 选择学生后管理课程、作业、反馈、错题与报告。\n4. AI、语音与文档转换需要配置相应的服务和本地工具。\n\n**桌面版启动：** 在项目目录运行 npm install，再运行 npm run desktop。开发时使用 npm run desktop:dev。\n\n**快捷键：** 1 学生、2 回访、3 教学资源、4 学生记录、5 错题报告、6 视频、7 讲义库。输入时禁用。\n\n**书籍入口：** 桌面菜单「页面 → 书籍」。\n\n文件操作只作用于配置的根目录；删除进入系统废纸篓。配置与轻量记录保存到桌面应用用户数据目录，浏览器使用 localStorage。`}</Markdown>
+          <Markdown>{`这是一个本地优先的教培工作台。\n\n1. 在配置中心选择学生、讲义与教学资源根目录。\n2. 学生文件夹自动扫描为档案，也可以直接新增。\n3. 选择学生后管理课程、作业、反馈、错题与报告。\n4. AI 与文档转换需要配置相应的服务和本地工具。\n\n**桌面版启动：** 在项目目录运行 npm install，再运行 npm run desktop。开发时使用 npm run desktop:dev。\n\n**快捷键：** 1 学生、2 回访、3 教学资源、4 学生记录、5 错题报告、6 视频、7 讲义库。输入时禁用。\n\n**书籍入口：** 桌面菜单「页面 → 书籍」。\n\n文件操作只作用于配置的根目录；删除进入系统废纸篓。配置与轻量记录保存到桌面应用用户数据目录，浏览器使用 localStorage。`}</Markdown>
         </Modal>
       )}
     </div>
