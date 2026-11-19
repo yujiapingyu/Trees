@@ -57,6 +57,9 @@ export default function SchoolManager({ initialStage = "初中" }) {
           const linked = data.students.filter(
             (student) => student.schoolId === s.id,
           );
+          const usedByExam = (data.exams || []).some((e) =>
+            e.schoolIds.includes(s.id),
+          );
           return (
             <div className="linked-row" key={s.id}>
               <strong>{s.name}</strong>
@@ -67,9 +70,9 @@ export default function SchoolManager({ initialStage = "初中" }) {
               </Button>
               <Button
                 icon={Trash2}
-                disabled={!!linked.length}
+                disabled={!!linked.length || usedByExam}
                 title={
-                  linked.length ? "请先修改关联学生的学校" : "删除未关联学校"
+                  linked.length ? "请先处理关联学生及考试" : "删除未关联学校"
                 }
                 onClick={() => setRemove(s)}
               >

@@ -28,9 +28,10 @@ export function saveSchool(data, form) {
   if (
     existing &&
     existing.stage !== stage &&
-    data.students.some((s) => s.schoolId === existing.id)
+    (data.students.some((s) => s.schoolId === existing.id) ||
+      (data.exams || []).some((e) => e.schoolIds.includes(existing.id)))
   )
-    throw Error("已有学生关联该学校，不能直接更改学段");
+    throw Error("已有学生或考试关联该学校，不能直接更改学段");
   const school = { id: form.id || id(), name, stage };
   return {
     ...data,
@@ -40,8 +41,11 @@ export function saveSchool(data, form) {
   };
 }
 export function deleteSchool(data, schoolId) {
-  if (data.students.some((s) => s.schoolId === schoolId))
-    throw Error("该学校仍有关联学生，请先修改这些学生的学校");
+  if (
+    data.students.some((s) => s.schoolId === schoolId) ||
+    (data.exams || []).some((e) => e.schoolIds.includes(schoolId))
+  )
+    throw Error("该学校仍有关联学生或考试，请先处理关联");
   return { ...data, schools: data.schools.filter((s) => s.id !== schoolId) };
 }
 export function validateStudentSchool(form, data) {

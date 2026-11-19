@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Phone,
   PhoneCall,
@@ -9,6 +9,8 @@ import {
   Trash2,
   Pencil,
   Users,
+  Sparkles,
+  Square,
 } from "lucide-react";
 import { useApp, useView } from "../shared/store";
 import {
@@ -18,6 +20,7 @@ import {
   id,
   studentMatches,
   safeStudentContext,
+  parseJSONResult,
 } from "../shared/domain";
 import {
   PageHeader,
@@ -31,22 +34,19 @@ import {
   Empty,
   Confirm,
   Markdown,
+  ErrorBox,
+  Modal,
 } from "../components/UI";
 import { Avatar } from "../components/StudentList";
 import { AIAction } from "../components/AIPanel";
-const fields = [
-  ["purpose", "沟通目的"],
-  ["content", "沟通内容"],
-  ["parentFeedback", "家长反馈"],
-  ["habits", "学习习惯"],
-  ["keyInfo", "关键信息"],
-  ["solution", "解决方案"],
-  ["solutionFeedback", "家长对方案反馈"],
-  ["plan", "后续安排"],
-  ["notes", "备注"],
-];
+import { services } from "../shared/services";
+import {
+  FOLLOWUP_FIELDS as fields,
+  followupSummaryPrompt,
+  validateFollowupSummary,
+} from "../shared/followupSummary";
 function Detail({ student }) {
-  const { data, mutate, run } = useApp();
+  const { data, config, mutate, run, notify } = useApp();
   const empty = () => ({
     id: id(),
     studentId: student.id,
@@ -64,7 +64,49 @@ function Detail({ student }) {
   });
   const [form, setForm] = useState(empty),
     [script, setScript] = useState(""),
-    [remove, setRemove] = useState(null);
+    [remove, setRemove] = useState(null),
+    [summary, setSummary] = useState(""),
+    [generating, setGenerating] = useState(false),
+    [summaryError, setSummaryError] = useState(""),
+    [pendingFields, setPendingFields] = useState(null);
+  const request = useRef(""),
+    live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+      if (request.current) services.cancelAI(request.current).catch(() => {});
+    };
+  }, []);
+  const generateSummary = async () => {
+    setSummaryError("");
+    setGenerating(true);
+    try {
+      const task = followupSummaryPrompt(summary);
+      if (!config.deepseekKey)
+        throw Error("请先在配置中心设置 DeepSeek API Key");
+      request.current = id();
+      const result = await services.ai({
+        id: request.current,
+        task,
+        json: true,
+      });
+      if (!live.current) return;
+      const extracted = validateFollowupSummary(parseJSONResult(result.text));
+      if (fields.some(([key]) => (form[key] || "").trim()))
+        setPendingFields(extracted);
+      else {
+        setForm((f) => ({ ...f, ...extracted }));
+        notify("九项回访内容已填入，请核对后保存");
+      }
+    } catch (e) {
+      if (live.current) setSummaryError(e.message);
+    } finally {
+      if (live.current) setGenerating(false);
+      request.current = "";
+    }
+  };
+
   const records = data.followups
     .filter((f) => f.studentId === student.id)
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -98,7 +140,7 @@ function Detail({ student }) {
         <div className="button-row">
           <AIAction
             label="生成沟通提纲与话术"
-            disabled={stopped}
+            disabled={stopped || generating}
             task={() =>
               "基于以下真实学生数据生成电话提纲和自然口语化家长话术。缺失数据明确标注，不能编造。\n" +
               JSON.stringify(safeStudentContext(student, data))
@@ -106,7 +148,7 @@ function Detail({ student }) {
             onResult={setScript}
           />
           <Button
-            disabled={stopped}
+            disabled={stopped || generating}
             onClick={() =>
               setScript(
                 `【本地模板 / 非 AI 生成】\n\n${student.name}家长您好，方便聊一下孩子最近的学习情况吗？\n\n1. 询问近期作业与在家学习习惯。\n2. 结合实际课堂记录反馈掌握情况。\n3. 确认需要共同解决的问题。\n4. 商议后续学习安排与下次沟通时间。`,
@@ -123,13 +165,55 @@ function Detail({ student }) {
           </>
         )}
       </Section>
+      <Section
+        title="摘要整理"
+        subtitle="输入实际回访摘要，AI 将归类填入下方九项；未提及的信息留空"
+      >
+        <Field label="回访内容摘要">
+          <textarea
+            rows={5}
+            value={summary}
+            disabled={stopped || generating}
+            onChange={(e) => setSummary(e.target.value)}
+            placeholder="例如：家长反馈近期作业拖延；商议每天固定时间练习，家长同意先执行一周，下周再联系……"
+          />
+        </Field>
+        <div className="button-row">
+          <Button
+            icon={Sparkles}
+            variant="primary"
+            busy={generating}
+            disabled={stopped || !summary.trim()}
+            onClick={generateSummary}
+          >
+            根据摘要生成并填入
+          </Button>
+          {generating && (
+            <Button
+              icon={Square}
+              onClick={() => services.cancelAI(request.current)}
+            >
+              取消生成
+            </Button>
+          )}
+        </div>
+        {summaryError && (
+          <ErrorBox
+            message={summaryError}
+            retry={stopped || generating ? undefined : generateSummary}
+          />
+        )}
+        <p className="form-hint">
+          只整理当前输入的摘要，不自动保存记录；已有填写内容时会先展示替换预览。
+        </p>
+      </Section>
       <Section title="回访记录" subtitle="记录沟通的事实，也记录接下来的行动">
         <div className="form-grid two">
           <Field label="回访日期">
             <input
               type="date"
               value={form.date}
-              disabled={stopped}
+              disabled={stopped || generating}
               onChange={(e) =>
                 setForm((f) => ({
                   ...f,
@@ -143,7 +227,7 @@ function Detail({ student }) {
             <input
               type="date"
               value={form.nextDate}
-              disabled={stopped}
+              disabled={stopped || generating}
               min={form.date}
               onChange={(e) =>
                 setForm((f) => ({ ...f, nextDate: e.target.value }))
@@ -152,20 +236,30 @@ function Detail({ student }) {
           </Field>
         </div>
         {fields.map(([k, l]) => (
-          <Field key={k} label={l}>
+          <div className="followup-field" key={k}>
+            <div className="followup-field-heading">
+              <label htmlFor={"followup-" + student.id + "-" + k}>{l}</label>
+              <CopyButton
+                text={form[k] || ""}
+                ariaLabel={"复制" + l}
+                disabled={!form[k]?.trim()}
+              />
+            </div>
             <textarea
-              disabled={stopped}
+              id={"followup-" + student.id + "-" + k}
+              aria-label={l}
+              disabled={stopped || generating}
               rows={k === "content" ? 4 : 2}
               value={form[k] || ""}
               onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))}
             />
-          </Field>
+          </div>
         ))}
         <div className="button-row">
           <Button
             icon={Save}
             variant="primary"
-            disabled={stopped}
+            disabled={stopped || generating}
             onClick={() =>
               run(async () => {
                 if (!form.date || !form.content.trim())
@@ -179,12 +273,21 @@ function Detail({ student }) {
                     : [...d.followups, form],
                 }));
                 setForm(empty());
+                setSummary("");
+                setSummaryError("");
               }, "回访已保存")
             }
           >
             保存回访
           </Button>
-          <Button onClick={() => setForm(empty())} disabled={stopped}>
+          <Button
+            onClick={() => {
+              setForm(empty());
+              setSummary("");
+              setSummaryError("");
+            }}
+            disabled={stopped || generating}
+          >
             清空草稿
           </Button>
         </div>
@@ -209,7 +312,10 @@ function Detail({ student }) {
                 .filter(([k]) => r[k])
                 .map(([k, l]) => (
                   <div key={k}>
-                    <h4>{l}</h4>
+                    <div className="followup-field-heading">
+                      <h4>{l}</h4>
+                      <CopyButton text={r[k]} ariaLabel={"复制历史" + l} />
+                    </div>
                     <Markdown>{r[k]}</Markdown>
                   </div>
                 ))}
@@ -220,7 +326,7 @@ function Detail({ student }) {
                     .join("\n")}
                 />
                 <Button
-                  disabled={stopped}
+                  disabled={stopped || generating}
                   icon={Pencil}
                   onClick={() => {
                     setForm(r);
@@ -232,7 +338,7 @@ function Detail({ student }) {
                   编辑
                 </Button>
                 <Button
-                  disabled={stopped}
+                  disabled={stopped || generating}
                   icon={Trash2}
                   onClick={() => setRemove(r)}
                 >
@@ -243,6 +349,37 @@ function Detail({ student }) {
           ))
         )}
       </Section>
+      {pendingFields && (
+        <Modal
+          title="预览回访整理结果"
+          onClose={() => setPendingFields(null)}
+          wide
+        >
+          <div className="info-banner">
+            当前表单已有内容。确认后将替换下方九项，摘要未提及的项目会清空；回访日期、下次联系日期和已保存的历史不变。
+          </div>
+          {fields.map(([key, label]) => (
+            <div className="summary-preview-field" key={key}>
+              <h4>{label}</h4>
+              <p>{pendingFields[key] || "（摘要未提及，将留空）"}</p>
+            </div>
+          ))}
+          <footer>
+            <Button onClick={() => setPendingFields(null)}>保留原草稿</Button>
+            <Button
+              variant="primary"
+              disabled={stopped}
+              onClick={() => {
+                setForm((f) => ({ ...f, ...pendingFields }));
+                setPendingFields(null);
+                notify("九项回访内容已替换，请核对后保存");
+              }}
+            >
+              替换并填入九项
+            </Button>
+          </footer>
+        </Modal>
+      )}
       {remove && (
         <Confirm
           title="删除回访记录"

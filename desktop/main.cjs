@@ -87,12 +87,18 @@ app
       copy: (_, a, b) => files.copy(a, b),
       pick: async (_, kind, filters) => {
         const r = await dialog.showOpenDialog(win, {
-          properties: kind === "directory" ? ["openDirectory"] : ["openFile"],
+          properties:
+            kind === "directory"
+              ? ["openDirectory"]
+              : kind === "files"
+                ? ["openFile", "multiSelections"]
+                : ["openFile"],
           filters: filters || [],
         });
-        const p = r.filePaths[0];
-        if (p) files.grants.add(await require("./core.cjs").canonical(p));
-        return p || null;
+        const paths = r.filePaths || [];
+        for (const p of paths)
+          files.grants.add(await require("./core.cjs").canonical(p));
+        return kind === "files" ? paths : paths[0] || null;
       },
       study: (_, a, b, f, e, o) => docs.study(a, b, f, e, o),
       readText: (_, p) => docs.text(p),
@@ -177,7 +183,7 @@ app
             "planning",
             "teachingVideos",
             "lessonLibrary",
-            "questionBank",
+            "exams",
             "books",
             "settings",
           ].map((command, i) => ({
@@ -190,7 +196,7 @@ app
               "分层规划",
               "教学视频",
               "讲义库",
-              "题库管理",
+              "考试管理",
               "书籍",
               "配置中心",
             ][i],

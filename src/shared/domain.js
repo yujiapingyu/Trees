@@ -100,16 +100,6 @@ export function validateName(name, students = [], excludeId) {
     throw Error("该名称已存在，请使用其他名称");
   return n;
 }
-export function validatePair(mode, original, answer) {
-  if (!original) throw Error("请选择原试题文件");
-  const valid = (p) => /\.(docx?|pdf)$/i.test(p);
-  if (!valid(original)) throw Error("仅支持 DOC / DOCX / PDF");
-  if (mode === "paired") {
-    if (!answer) throw Error("双文件模式必须选择对应解析版");
-    if (original === answer) throw Error("试题版与解析版不能是同一个文件");
-    if (!valid(answer)) throw Error("解析版格式不支持");
-  }
-}
 export function validateBlank(factor, exponent) {
   if (!Number.isFinite(+factor) || +factor < 0.1 || +factor > 1.5)
     throw Error("空白量系数应为 0.1–1.5");
@@ -176,6 +166,26 @@ export function safeStudentContext(student, data) {
       school:
         (data.schools || []).find((s) => s.id === student.schoolId)?.name || "",
     },
+    exams: (data.examRecords || [])
+      .filter((r) => r.studentId === student.id)
+      .map((r) => {
+        const exam = (data.exams || []).find((e) => e.id === r.examId);
+        return {
+          ...r,
+          exam: exam
+            ? {
+                name: exam.name,
+                grade: exam.grade,
+                date: exam.date,
+                subjects: exam.subjects.map((s) => ({
+                  id: s.id,
+                  name: s.name,
+                  maxScore: s.maxScore,
+                })),
+              }
+            : null,
+        };
+      }),
     lessons: take("refs"),
     homework: take("homework"),
     feedback: take("feedback").slice(-10),
@@ -226,7 +236,8 @@ export const EMPTY_DATA = {
   analysis: {},
   videoHistory: [],
   videoNotes: {},
-  banks: [],
+  exams: [],
+  examRecords: [],
   favorites: [],
   recent: [],
 };
