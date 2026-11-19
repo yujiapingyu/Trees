@@ -4,7 +4,6 @@ import {
   addDays,
   followupState,
   validateName,
-  validateImages,
   validatePair,
   validateBlank,
   validateQuestions,
@@ -14,7 +13,6 @@ import {
   removeRef,
   uniqueRef,
   timeFilter,
-  recordingTransition,
 } from "../src/shared/domain.js";
 test("14 天回访提醒跨年、逾期、临近、停课规则", () => {
   assert.equal(addDays("2026-12-25", 14), "2027-01-08");
@@ -52,13 +50,6 @@ test("名称唯一且阻止路径注入", () => {
     validateName(" 张三 ", [{ id: "1", name: "张三" }], "1"),
     "张三",
   );
-});
-test("图片数量、类型、32 MiB 边界", () => {
-  const file = { type: "image/png", size: 32 * 1024 * 1024 };
-  validateImages([file], 7);
-  assert.throws(() => validateImages([file], 8));
-  assert.throws(() => validateImages([{ ...file, size: file.size + 1 }]));
-  assert.throws(() => validateImages([{ type: "image/svg+xml", size: 10 }]));
 });
 test("双文件配对不接受缺失或同一文件", () => {
   validatePair("original", "a.docx");
@@ -120,16 +111,6 @@ test("时间筛选以周一为起点、按课程取最近 N 次", () => {
   assert.equal(timeFilter(q, "month", "2026-11-17").length, 3);
   assert.equal(timeFilter(q, "recent", "2026-11-17", 1)[0].lessonId, "c");
 });
-test("录音必须按保存、转写、摘要的顺序完成，并可取消与重试", () => {
-  let state = "idle";
-  for (const e of ["start", "stop", "saved", "done", "done"])
-    state = recordingTransition(state, e);
-  assert.equal(state, "done");
-  assert.equal(recordingTransition("recording", "cancel"), "idle");
-  assert.equal(recordingTransition("error", "retry"), "transcribing");
-  assert.throws(() => recordingTransition("idle", "done"));
-});
-
 test("畸形 AI 结构在写入与渲染前被拦截，数字答案归一为文本", () => {
   for (const q of [
     null,

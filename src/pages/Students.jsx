@@ -35,6 +35,14 @@ import { services } from "../shared/services";
 import { isWithinRoot, studentDirectoryState } from "../shared/paths";
 import { useCourses, useFiles, useLessonIndex } from "../shared/hooks";
 import StudentList, { Avatar } from "../components/StudentList";
+import SchoolManager from "../components/SchoolManager";
+import {
+  SCHOOL_STAGES,
+  schoolForStudent,
+  schoolNameForStudent,
+  schoolStageForGrade,
+} from "../shared/schools";
+import { addLessonReference } from "../shared/lessonReferences";
 import {
   Button,
   IconButton,
@@ -61,7 +69,13 @@ import {
 } from "../components/StudentPanels";
 import { Assistant } from "../components/AIPanel";
 export function StudentForm({ student, onClose, onSaved }) {
-  const { addStudent, editStudent, run } = useApp();
+  const { addStudent, editStudent, run, data } = useApp();
+  const [schoolStage, setSchoolStage] = useState(
+      schoolForStudent(student, data)?.stage ||
+        schoolStageForGrade(student?.grade) ||
+        "初中",
+    ),
+    [manageSchools, setManageSchools] = useState(false);
   const [form, setForm] = useState(
       student
         ? {
@@ -69,8 +83,9 @@ export function StudentForm({ student, onClose, onSaved }) {
             grade: student.grade,
             phone: student.phone,
             notes: student.notes,
+            schoolId: student.schoolId || "",
           }
-        : { name: "", grade: "", phone: "", notes: "" },
+        : { name: "", grade: "", phone: "", notes: "", schoolId: "" },
     ),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -108,9 +123,19 @@ export function StudentForm({ student, onClose, onSaved }) {
           <Field label="年级">
             <select
               value={form.grade}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, grade: e.target.value }))
-              }
+              onChange={(e) => {
+                const grade = e.target.value,
+                  next = schoolStageForGrade(grade);
+                if (next) setSchoolStage(next);
+                setForm((f) => ({
+                  ...f,
+                  grade,
+                  schoolId:
+                    next && schoolForStudent(f, data)?.stage !== next
+                      ? ""
+                      : f.schoolId,
+                }));
+              }}
             >
               <option value="">请选择年级</option>
               {GRADES.map((g) => (
@@ -119,6 +144,48 @@ export function StudentForm({ student, onClose, onSaved }) {
             </select>
           </Field>
         </div>
+        <div className="form-grid two">
+          <Field label="学校学段">
+            <select
+              value={schoolStage}
+              onChange={(e) => {
+                const stage = e.target.value;
+                setSchoolStage(stage);
+                setForm((f) => ({
+                  ...f,
+                  schoolId:
+                    schoolForStudent(f, data)?.stage === stage
+                      ? f.schoolId
+                      : "",
+                }));
+              }}
+            >
+              {SCHOOL_STAGES.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="关联学校">
+            <select
+              value={form.schoolId}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, schoolId: e.target.value }))
+              }
+            >
+              <option value="">暂不关联学校</option>
+              {data.schools
+                .filter((s) => s.stage === schoolStage)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        </div>
+        <Button type="button" onClick={() => setManageSchools(true)}>
+          管理 / 新增学校
+        </Button>
         <Field label="家长电话">
           <input
             type="tel"
@@ -149,6 +216,11 @@ export function StudentForm({ student, onClose, onSaved }) {
           </Button>
         </footer>
       </form>
+      {manageSchools && (
+        <Modal title="学校管理" onClose={() => setManageSchools(false)} wide>
+          <SchoolManager initialStage={schoolStage} />
+        </Modal>
+      )}
     </Modal>
   );
 }
@@ -238,19 +310,9 @@ function LessonPicker({ student, onClose }) {
                       data.refs.filter((r) => r.studentId === student.id),
                       l.id,
                     );
-                    await mutate((d) => {
-                      uniqueRef(
-                        d.refs.filter((r) => r.studentId === student.id),
-                        l.id,
-                      );
-                      return {
-                        ...d,
-                        refs: [
-                          ...d.refs,
-                          { id: id(), studentId: student.id, lessonId: l.id },
-                        ],
-                      };
-                    });
+                    await mutate((d) =>
+                      addLessonReference(d, student.id, l.id),
+                    );
                   }, "讲义已关联")
                 }
               >
@@ -670,6 +732,9 @@ export default function Students({ navigate }) {
                   </div>
                   <div className="profile-meta">
                     <span>{student.grade || "未设置年级"}</span>
+                    {schoolNameForStudent(student, data) && (
+                      <span>{schoolNameForStudent(student, data)}</span>
+                    )}
                     <span>
                       <Phone size={12} />
                       {student.phone || "未设置电话"}

@@ -3,26 +3,15 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
-const PATH_KEYS = [
-  "studentsRoot",
-  "lessonsRoot",
-  "templatesRoot",
-  "questionBankRoot",
-  "classAudioRoot",
-  "followupAudioRoot",
-  "referenceJunior",
-  "referenceSenior",
-  "referenceVocational",
-  "textbooksJunior",
-  "textbooksSenior",
-  "exercisesJunior",
-  "exercisesSenior",
-  "planningJunior",
-  "planningSenior",
-  "videosRoot",
-  "booksRoot",
-  "usbRoot",
-];
+const CONFIG_KEYS = require("../src/shared/configKeys.json");
+const PATH_KEYS = CONFIG_KEYS.roots;
+function sanitizeConfig(value = {}) {
+  return Object.fromEntries(
+    [...CONFIG_KEYS.roots, ...CONFIG_KEYS.extras]
+      .filter((key) => typeof value[key] === "string")
+      .map((key) => [key, value[key]]),
+  );
+}
 class DiskStorage {
   constructor(file) {
     this.file = file;
@@ -249,32 +238,15 @@ class AIProvider {
   cancel(id) {
     this.tasks.get(id)?.abort();
   }
-  async generate({
-    id,
-    task,
-    messages,
-    images,
-    vision = false,
-    qwen = false,
-    json = false,
-  }) {
-    const c = this.storage.get("sm_path_config_v1", {});
-    const prefix = qwen ? "qwen" : "deepseek";
-    const key = c[prefix + "Key"];
-    if (!key)
-      throw Error(`请先在配置中心设置 ${qwen ? "千问" : "DeepSeek"} API Key`);
-    const host =
-      (vision && !qwen ? c.deepseekVisionHost : c[prefix + "Host"]) ||
-      (qwen
-        ? "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        : "https://api.deepseek.com");
+  async generate({ id, task, messages, json = false }) {
+    const c = this.storage.get("sm_path_config_v1", {}),
+      key = c.deepseekKey;
+    if (!key) throw Error("请先在配置中心设置 DeepSeek API Key");
+    const host = c.deepseekHost || "https://api.deepseek.com";
     const url = new URL(host.replace(/\/$/, "") + "/chat/completions");
     if (!["https:", "http:"].includes(url.protocol))
       throw Error("模型服务地址必须为 HTTP(S)");
-    const model = vision
-      ? c[`${prefix}VisionModel`] || (qwen ? "qwen-vl-max" : "")
-      : c[prefix + "Model"] || "deepseek-chat";
-    if (!model) throw Error("请配置支持图片输入的视觉模型与兼容服务地址");
+    const model = c.deepseekModel || "deepseek-chat";
     const ctrl = new AbortController();
     this.tasks.set(id, ctrl);
     const timer = setTimeout(() => ctrl.abort(), 180000);
@@ -288,19 +260,6 @@ class AIProvider {
         },
         ...(messages || [{ role: "user", content: task }]),
       ];
-      if (images?.length) {
-        const last = msgs.at(-1);
-        last.content = [
-          {
-            type: "text",
-            text: typeof last.content === "string" ? last.content : task,
-          },
-          ...images.map((image) => ({
-            type: "image_url",
-            image_url: typeof image === "string" ? { url: image } : image,
-          })),
-        ];
-      }
       const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -489,45 +448,6 @@ class DocumentService {
       layout: "保留原 DOCX 结构，已插入作答空白；请人工复核分页与答案残留",
     };
   }
-  async transcribe(file) {
-    const c = this.files.config();
-    if (!c.whisperPath || !c.whisperModel)
-      throw Error("请先配置 whisper-cli 与 Whisper 模型文件");
-    const p = await this.files.guard(file);
-    await fs.access(c.whisperPath);
-    await fs.access(c.whisperModel);
-    const base = p.replace(/\.[^.]+$/, "");
-    const wav = base + ".whisper.wav";
-    await run(c.ffmpegPath || "ffmpeg", [
-      "-y",
-      "-i",
-      p,
-      "-ar",
-      "16000",
-      "-ac",
-      "1",
-      "-c:a",
-      "pcm_s16le",
-      wav,
-    ]);
-    try {
-      await run(c.whisperPath, [
-        "-m",
-        c.whisperModel,
-        "-f",
-        wav,
-        "-l",
-        c.whisperLanguage || "zh",
-        "-otxt",
-        "-of",
-        base,
-      ]);
-      const text = await fs.readFile(base + ".txt", "utf8");
-      return { text, path: base + ".txt" };
-    } finally {
-      await fs.rm(wav, { force: true });
-    }
-  }
 }
 module.exports = {
   DiskStorage,
@@ -538,4 +458,5 @@ module.exports = {
   canonical,
   run,
   PATH_KEYS,
+  sanitizeConfig,
 };

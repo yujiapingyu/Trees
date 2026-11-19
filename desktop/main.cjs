@@ -16,6 +16,7 @@ const {
   FileService,
   DocumentService,
   AIProvider,
+  sanitizeConfig,
 } = require("./core.cjs");
 const dev = process.env.TEACHING_DEV === "1";
 if (process.env.TEACHING_DATA_DIR)
@@ -39,6 +40,10 @@ app
     const store = await new DiskStorage(
       path.join(app.getPath("userData"), "workspace.json"),
     ).init();
+    const savedConfig = store.get("sm_path_config_v1", {}),
+      cleanConfig = sanitizeConfig(savedConfig);
+    if (JSON.stringify(cleanConfig) !== JSON.stringify(savedConfig))
+      await store.set("sm_path_config_v1", cleanConfig);
     const files = new FileService(store, {
       openPath: shell.openPath,
       trashItem: shell.trashItem,
@@ -68,7 +73,10 @@ app
           !key.startsWith("sm_view_state_")
         )
           throw Error("不支持的存储键");
-        return store.set(key, value);
+        return store.set(
+          key,
+          key === "sm_path_config_v1" ? sanitizeConfig(value) : value,
+        );
       },
       list: (_, p, recursive) => files.list(p, recursive),
       check: (_, p) => files.check(p),
@@ -88,7 +96,6 @@ app
       },
       study: (_, a, b, f, e, o) => docs.study(a, b, f, e, o),
       readText: (_, p) => docs.text(p),
-      readBytes: async (_, p) => (await files.read(p)).toString("base64"),
       sheet: (_, p) => docs.sheet(p),
       pdf: (_, p) => docs.pdf(p),
       word: (_, p, text, overwrite) => docs.word(p, text, overwrite),
@@ -97,11 +104,8 @@ app
           overwrite,
           backup: overwrite,
         }),
-      writeBytes: (_, p, base64) =>
-        files.write(p, Buffer.from(base64, "base64")),
       ai: (_, request) => ai.generate(request),
       cancelAI: (_, id) => ai.cancel(id),
-      transcribe: (_, p) => docs.transcribe(p),
       volumes: async () =>
         process.platform === "darwin"
           ? (await fs.readdir("/Volumes", { withFileTypes: true }))
@@ -173,8 +177,6 @@ app
             "planning",
             "teachingVideos",
             "lessonLibrary",
-            "visionDemo",
-            "examAnalysis",
             "questionBank",
             "books",
             "settings",
@@ -188,8 +190,6 @@ app
               "分层规划",
               "教学视频",
               "讲义库",
-              "视觉实验",
-              "试卷分析",
               "题库管理",
               "书籍",
               "配置中心",

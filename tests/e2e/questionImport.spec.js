@@ -10,7 +10,7 @@ const {
   FileService,
   DocumentService,
 } = require("../../desktop/core.cjs");
-test("题库真实 DOCX 转图、OCR 接口编排、配对、编辑保存与重启恢复", async () => {
+test("题库 DOCX/PDF 文字提取、DeepSeek 配对分类、保存与重启恢复", async () => {
   test.setTimeout(90000);
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "teaching-bank-e2e-"));
   const profile = path.join(tmp, "profile");
@@ -25,20 +25,19 @@ test("题库真实 DOCX 转图、OCR 接口编排、配对、编辑保存与重�
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body);
     let content;
-    if (request.model === "qwen-vl-max") {
-      expect(request.messages.at(-1).content[1].image_url.url).toMatch(
-        /^data:image\/jpeg;base64,/,
-      );
-      const text = request.messages.at(-1).content[0].text;
+    const task = request.messages.at(-1).content;
+    expect(typeof task).toBe("string");
+    expect(request.messages.some((m) => Array.isArray(m.content))).toBe(false);
+    if (task.startsWith("从以下")) {
       content = JSON.stringify(
-        text.includes("解析版")
+        task.includes("从以下解析版")
           ? [
               {
                 number: "1",
-                stem: "答案",
+                stem: "解析版对应题目",
                 answer: "x=3",
                 explanation: "两边同时减2",
-                figures: [],
+                options: [],
               },
             ]
           : [
@@ -48,14 +47,12 @@ test("题库真实 DOCX 转图、OCR 接口编排、配对、编辑保存与重�
                 options: [],
                 answer: "",
                 explanation: "",
-                figures: [],
                 uncertain: false,
               },
             ],
       );
     } else {
-      const last = request.messages.at(-1).content;
-      const list = JSON.parse(last.slice(last.indexOf("\n") + 1));
+      const list = JSON.parse(task.slice(task.indexOf("\n") + 1));
       content = JSON.stringify(
         list.map((q) => ({
           id: q.id,
@@ -74,14 +71,15 @@ test("题库真实 DOCX 转图、OCR 接口编排、配对、编辑保存与重�
   await store.set("sm_path_config_v1", {
     questionBankRoot: root,
     deepseekKey: "test-key",
-    qwenKey: "test-key",
     deepseekHost: host,
-    qwenHost: host,
   });
   const docs = new DocumentService(new FileService(store));
-  const original = path.join(root, "原试题.docx"),
+  const original = path.join(root, "原试题.pdf"),
     answer = path.join(root, "解析版.docx");
-  await docs.word(original, "1. 解方程 x+2=5");
+  const wordOriginal = path.join(root, "原试题.docx");
+  await docs.word(wordOriginal, "1. 解方程 x+2=5");
+  const pdfOriginal = await docs.pdf(wordOriginal);
+  await fs.writeFile(original, Buffer.from(pdfOriginal.base64, "base64"));
   await docs.word(answer, "1. 答案 x=3；解析：两边同时减2");
   let app;
   try {
@@ -152,7 +150,7 @@ test("题库真实 DOCX 转图、OCR 接口编排、配对、编辑保存与重�
     expect(bank.questions[0].difficulty).toBe("基础");
     expect(bank.questions[0].answer).toContain("已校对");
     expect(
-      await fs.readdir(path.join(path.dirname(bank.path), "images")),
+      await fs.readdir(path.join(path.dirname(bank.path), "source")),
     ).toHaveLength(2);
   } finally {
     if (app) await app.close();

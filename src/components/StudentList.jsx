@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Plus, Users, FolderOpen, SlidersHorizontal } from "lucide-react";
 import { useApp } from "../shared/store";
 import { studentDirectoryState } from "../shared/paths";
+import { schoolNameForStudent } from "../shared/schools";
 import { studentMatches, GRADES, STATUSES } from "../shared/domain";
 import { Button, SearchBox, Badge, Empty, IconButton } from "./UI";
 export function Avatar({ student, size = "" }) {
@@ -35,7 +36,7 @@ export default function StudentList({
   const { data, config } = useApp();
   const students = (custom || data.students).filter(
     (s) =>
-      studentMatches(s, query) &&
+      studentMatches(s, query, data.schools) &&
       (!grade || s.grade === grade) &&
       (status === "all" ||
         (status === "active" ? s.status !== "已停课" : s.status === status)),
@@ -118,6 +119,8 @@ export default function StudentList({
                 </strong>
                 <small>
                   {s.grade || "未设置年级"}
+                  {schoolNameForStudent(s, data) &&
+                    " · " + schoolNameForStudent(s, data)}
                   {count && " · " + count(s)}
                 </small>
               </span>

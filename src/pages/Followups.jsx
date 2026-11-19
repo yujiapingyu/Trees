@@ -34,7 +34,6 @@ import {
 } from "../components/UI";
 import { Avatar } from "../components/StudentList";
 import { AIAction } from "../components/AIPanel";
-import Recording from "../components/Recording";
 const fields = [
   ["purpose", "沟通目的"],
   ["content", "沟通内容"],
@@ -189,10 +188,6 @@ function Detail({ student }) {
             清空草稿
           </Button>
         </div>
-        <Recording
-          student={student}
-          onDraft={(v, meta) => setForm((f) => ({ ...f, ...meta, content: v }))}
-        />
       </Section>
       <Section title="历史回访" subtitle={records.length + " 次沟通记录"}>
         {!records.length ? (
@@ -288,7 +283,7 @@ export default function Followups() {
   const students = data.students
     .filter(
       (s) =>
-        studentMatches(s, view.query) &&
+        studentMatches(s, view.query, data.schools) &&
         (view.filter === "all" ||
           (s.status !== "已停课" &&
             (view.filter === "due"

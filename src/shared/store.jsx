@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { storage, services, desktop, join } from "./services";
 import { id, validateName, EMPTY_DATA } from "./domain";
+import { validateStudentSchool } from "./schools";
 const Context = createContext(null);
 export const useApp = () => useContext(Context);
 export function useView(key, initial) {
@@ -137,6 +138,7 @@ export function AppProvider({ children }) {
     });
   const addStudent = (form) =>
     studentOperation(async () => {
+      validateStudentSchool(form, current.current);
       const name = validateName(form.name, current.current.students);
       if (!configRef.current.studentsRoot)
         throw Error("请先在配置中心设置学生根目录");
@@ -158,6 +160,7 @@ export function AppProvider({ children }) {
     });
   const editStudent = (student, form) =>
     studentOperation(async () => {
+      validateStudentSchool(form, current.current);
       const name = validateName(
         form.name,
         current.current.students,
