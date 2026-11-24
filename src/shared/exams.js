@@ -82,6 +82,11 @@ export function saveExam(data, form) {
   )
     throw Error("同名、同日期、同年级的考试已存在，请复用现有考试");
   const original = data.exams.find((e) => e.id === exam.id);
+  const courseRefs = (data.refs || []).filter(
+    (r) => r.type === "exam" && r.examId === exam.id,
+  );
+  if (courseRefs.some((r) => !exam.subjects.some((s) => s.id === r.subjectId)))
+    throw Error("学科已被课程讲义引用，不能删除；请先处理对应课程引用");
   const records = data.examRecords.filter((r) => r.examId === exam.id);
   if (
     original?.subjects.some(
@@ -187,9 +192,54 @@ export function saveExamRecord(data, form) {
   };
 }
 export function deleteExam(data, examId) {
+  if ((data.refs || []).some((r) => r.type === "exam" && r.examId === examId))
+    throw Error("考试已被课程讲义引用，请归档保留，或先移除对应课程引用");
   if (data.examRecords.some((r) => r.examId === examId))
     throw Error("考试已有学生记录，请归档保留历史，不能删除");
   return { ...data, exams: data.exams.filter((e) => e.id !== examId) };
+}
+export function removeExamFile(data, examId, subjectId, fileId) {
+  const exam = data.exams.find((e) => e.id === examId);
+  if (!exam || exam.archived) throw Error("考试已变更或归档，请刷新后重试");
+  const subject = exam.subjects.find((s) => s.id === subjectId);
+  const file = subject?.files?.find((f) => f.id === fileId);
+  if (!file) throw Error("文件关联已变更，请刷新后重试");
+  if (
+    file.kind === "paper" &&
+    (data.refs || []).some(
+      (r) =>
+        r.type === "exam" &&
+        r.examId === examId &&
+        r.subjectId === subjectId &&
+        (r.schoolId || "") === (file.schoolId || "") &&
+        (r.version || "默认卷") === (file.version || "默认卷"),
+    ) &&
+    !subject.files.some(
+      (f) =>
+        f.id !== fileId &&
+        f.kind === "paper" &&
+        (f.schoolId || "") === (file.schoolId || "") &&
+        (f.version || "默认卷") === (file.version || "默认卷"),
+    )
+  )
+    throw Error(
+      "这份试卷已被课程讲义引用，不能移除本组最后一份试卷；可先补充新试卷或处理课程引用",
+    );
+  return {
+    ...data,
+    exams: data.exams.map((e) =>
+      e.id === examId
+        ? {
+            ...e,
+            subjects: e.subjects.map((s) =>
+              s.id === subjectId
+                ? { ...s, files: s.files.filter((f) => f.id !== fileId) }
+                : s,
+            ),
+          }
+        : e,
+    ),
+  };
 }
 export function examTotal(record, exam) {
   const scored = record.results.filter((r) => r.status === "scored");

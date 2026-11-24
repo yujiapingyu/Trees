@@ -1,3 +1,4 @@
+import LessonPack from "../components/LessonPack";
 import React, { useState } from "react";
 import {
   BookOpen,
@@ -15,7 +16,6 @@ import {
   Link2,
   GripVertical,
   RefreshCw,
-  Save,
 } from "lucide-react";
 import { addLessonReference } from "../shared/lessonReferences";
 import { useApp, useView } from "../shared/store";
@@ -26,11 +26,8 @@ import {
   validateName,
   uniqueRef,
   removeRef,
-  validateBlank,
-  parseJSONResult,
-  today,
 } from "../shared/domain";
-import { services, join, basename, parent, generate } from "../shared/services";
+import { services, join, basename, parent } from "../shared/services";
 import {
   PageHeader,
   Button,
@@ -46,72 +43,30 @@ import {
   Modal,
   Field,
   Confirm,
-  Editor,
   CopyButton,
-  Markdown,
 } from "../components/UI";
 import { ResourcePicker } from "../components/FileBrowser";
-import { renderPDF } from "../shared/documents";
+import LessonDocumentTools from "../components/LessonDocumentTools";
+import CreateLesson from "../components/CreateLesson";
 function Tools({ kind, lesson, files, onClose, onRefresh }) {
-  const { data, config, mutate, run, notify } = useApp();
-  const { files: templates } = useFiles(config.templatesRoot);
+  const { mutate } = useApp();
   const [form, setForm] = useState({
       name: kind === "rename" ? lesson?.name || "" : "",
-      stage: "初中",
-      grade: "初一",
-      template: "",
-      source:
-        files?.find((f) => /教案.*\.docx$/i.test(f.name))?.path ||
-        files?.find((f) => /\.docx?$/i.test(f.name))?.path ||
-        "",
-      factor: 0.6,
-      exponent: 0.75,
       overwrite: false,
-      version: "人教版",
-      year: new Date().getFullYear(),
-      types: "选择题、填空题、解答题",
-      count: 10,
-      prompt: "",
     }),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [result, setResult] = useState(""),
-    [draft, setDraft] = useState("");
-  const [clean, setClean] = useState([]),
-    [layoutPath, setLayoutPath] = useState(""),
-    [layoutPages, setLayoutPages] = useState([]),
-    [checkingLayout, setCheckingLayout] = useState(false);
+    [result, setResult] = useState("");
+  const [clean, setClean] = useState([]);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const actions = {
-    create: "新建讲义",
     rename: "重命名讲义",
-    improve: "AI 完善教案",
-    study: "教案转学案",
-    pack: "打包讲义",
     clean: "清理文件",
   };
   const execute = async () => {
     setBusy(true);
     setError("");
     try {
-      if (kind === "create") {
-        const name = validateName(form.name);
-        if (form.stage !== "中职") validateName(form.grade);
-        if (!config.lessonsRoot || !form.template)
-          throw Error("请配置讲义目录并选择模板");
-        const dir = join(
-          config.lessonsRoot,
-          form.stage,
-          form.stage === "中职" ? "" : form.grade,
-          name,
-        );
-        /* mkdir ancestors via a template copy only after path existence checks */ const existing =
-          await services.check(dir);
-        if (existing.exists) throw Error("目标讲义目录已存在");
-        await services.copy(form.template, join(dir, basename(form.template)));
-        setResult("讲义已创建：" + dir);
-        onRefresh();
-      }
       if (kind === "rename") {
         const name = validateName(form.name);
         const target = join(parent(lesson.path), name);
@@ -142,100 +97,6 @@ function Tools({ kind, lesson, files, onClose, onRefresh }) {
         setResult("讲义已重命名");
         onRefresh();
       }
-      if (kind === "improve") {
-        if (!form.source) throw Error("请选择原教案");
-        if (
-          !Number.isInteger(+form.count) ||
-          form.count < 1 ||
-          form.count > 100
-        )
-          throw Error("题量应为 1–100 的整数");
-        const original = await services.readText(form.source);
-        const response = await generate(
-          `在原教案基础上完善教学设计。只输出 JSON 对象，含 goals（教学目标字符串）,focus（重点字符串）,difficulties（难点字符串）,procedure（教学过程字符串）,questions（恰好 ${form.count} 项数组，每项 type,stem,answer,explanation，均为字符串）。题型从以下设置选择：${form.types}。不编造学生情况。额外要求：${form.prompt}\n原文：${original}`,
-          { json: true },
-        );
-        const parsed = parseJSONResult(response.text);
-        for (const key of ["goals", "focus", "difficulties", "procedure"])
-          if (typeof parsed[key] !== "string" || !parsed[key].trim())
-            throw Error("输出结构校验失败，缺少：" + key);
-        if (
-          !Array.isArray(parsed.questions) ||
-          parsed.questions.length !== +form.count ||
-          parsed.questions.some(
-            (q) =>
-              typeof q.type !== "string" ||
-              typeof q.stem !== "string" ||
-              !q.stem.trim() ||
-              typeof q.answer !== "string" ||
-              typeof q.explanation !== "string",
-          )
-        )
-          throw Error("题目数量或题目结构不符合设置，未保存，请重试");
-        setDraft(
-          `# 教学目标\n\n${parsed.goals}\n\n# 重点难点\n\n重点：${parsed.focus}\n\n难点：${parsed.difficulties}\n\n# 教学过程\n\n${parsed.procedure}\n\n# 课后练习\n\n` +
-            parsed.questions
-              .map(
-                (q, i) =>
-                  `${i + 1}. 【${q.type}】${q.stem}\n\n答案：${q.answer}\n\n解析：${q.explanation}`,
-              )
-              .join("\n\n"),
-        );
-        setResult(
-          "已生成草稿，请校对后保存。保存将备份原文档后覆盖为标准 DOCX 文档。",
-        );
-      }
-      if (kind === "study") {
-        validateBlank(form.factor, form.exponent);
-        if (!form.source) throw Error("请选择教案 DOCX");
-        const target = join(
-          lesson.path,
-          basename(form.source).replace(
-            /(?:（教案）|教案)?\.docx$/i,
-            "（学案）.docx",
-          ),
-        );
-        if (target === form.source) throw Error("目标学案不能与原教案同路径");
-        const output = await services.study(
-          form.source,
-          target,
-          +form.factor,
-          +form.exponent,
-          form.overwrite,
-        );
-        setLayoutPath(output.path);
-        setLayoutPages([]);
-        setResult(
-          output.layout +
-            "；共识别 " +
-            output.questions +
-            " 道题。" +
-            output.path,
-        );
-        onRefresh();
-      }
-      if (kind === "pack") {
-        if (
-          !config.usbRoot ||
-          !form.stage ||
-          !form.version.trim() ||
-          !form.year ||
-          !form.grade.trim()
-        )
-          throw Error("请配置导出 U 盘目录，并填写学段、教材版本、年份、年级");
-        const nameParts = [
-          form.stage,
-          form.version,
-          String(form.year),
-          form.grade,
-          lesson.name,
-        ];
-        nameParts.forEach((p) => validateName(p));
-        const target = join(config.usbRoot, ...nameParts);
-        for (const f of files.filter((f) => !f.isDirectory))
-          await services.copy(f.path, join(target, f.relativePath || f.name));
-        setResult("已打包至：" + target);
-      }
       if (kind === "clean") {
         if (!clean.length) throw Error("请选择要清理的文件");
         if (!form.overwrite) throw Error("请勾选删除确认");
@@ -251,149 +112,13 @@ function Tools({ kind, lesson, files, onClose, onRefresh }) {
   };
   return (
     <Modal title={actions[kind]} onClose={() => !busy && onClose()} wide>
-      {["create", "rename"].includes(kind) && (
+      {kind === "rename" && (
         <Field label="讲义名称">
           <input
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
           />
         </Field>
-      )}
-      {["create", "pack"].includes(kind) && (
-        <div className="form-grid two">
-          <Field label="学段">
-            <select
-              value={form.stage}
-              onChange={(e) => set("stage", e.target.value)}
-            >
-              {["初中", "高中", "中职"].map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="年级 / 集合">
-            <input
-              value={form.grade}
-              onChange={(e) => set("grade", e.target.value)}
-            />
-          </Field>
-        </div>
-      )}
-      {kind === "create" && (
-        <Field label="DOC / DOCX 模板">
-          <select
-            value={form.template}
-            onChange={(e) => set("template", e.target.value)}
-          >
-            <option value="">请选择模板</option>
-            {templates
-              .filter((f) => /\.docx?$/i.test(f.name))
-              .map((f) => (
-                <option key={f.path} value={f.path}>
-                  {f.name}
-                </option>
-              ))}
-          </select>
-        </Field>
-      )}
-      {["improve", "study"].includes(kind) && (
-        <Field label="原教案文件">
-          <select
-            value={form.source}
-            onChange={(e) => set("source", e.target.value)}
-          >
-            <option value="">请选择</option>
-            {files
-              .filter((f) => /\.docx?$/i.test(f.name))
-              .map((f) => (
-                <option key={f.path} value={f.path}>
-                  {f.name}
-                </option>
-              ))}
-          </select>
-        </Field>
-      )}
-      {kind === "improve" && (
-        <>
-          <div className="form-grid two">
-            <Field label="题型">
-              <input
-                value={form.types}
-                onChange={(e) => set("types", e.target.value)}
-              />
-            </Field>
-            <Field label="题量（1–100）">
-              <input
-                type="number"
-                min="1"
-                max="100"
-                value={form.count}
-                onChange={(e) => set("count", +e.target.value)}
-              />
-            </Field>
-          </div>
-          <Field label="完善要求">
-            <textarea
-              value={form.prompt}
-              onChange={(e) => set("prompt", e.target.value)}
-            />
-          </Field>
-        </>
-      )}
-      {kind === "study" && (
-        <>
-          <div className="form-grid two">
-            <Field label="空白量系数（0.1–1.5）">
-              <input
-                type="number"
-                min=".1"
-                max="1.5"
-                step=".1"
-                value={form.factor}
-                onChange={(e) => set("factor", e.target.value)}
-              />
-            </Field>
-            <Field label="增长指数（0.5–1）">
-              <input
-                type="number"
-                min=".5"
-                max="1"
-                step=".05"
-                value={form.exponent}
-                onChange={(e) => set("exponent", e.target.value)}
-              />
-            </Field>
-          </div>
-          <p className="muted">
-            保留 DOCX
-            结构，按编号题目插入作答空间，移除独立答案/解析段落。复杂答案与分页请人工检查。
-          </p>
-          <label className="check-label">
-            <input
-              type="checkbox"
-              checked={form.overwrite}
-              onChange={(e) => set("overwrite", e.target.checked)}
-            />
-            允许覆盖同名学案（覆盖前备份）
-          </label>
-        </>
-      )}
-      {kind === "pack" && (
-        <div className="form-grid two">
-          <Field label="教材版本">
-            <input
-              value={form.version}
-              onChange={(e) => set("version", e.target.value)}
-            />
-          </Field>
-          <Field label="年份">
-            <input
-              type="number"
-              value={form.year}
-              onChange={(e) => set("year", e.target.value)}
-            />
-          </Field>
-        </div>
       )}
       {kind === "clean" && (
         <>
@@ -402,7 +127,9 @@ function Tools({ kind, lesson, files, onClose, onRefresh }) {
             .filter(
               (f) =>
                 !f.isDirectory &&
-                !/(历史教案|历史|备份|\.bak)/.test(f.relativePath || f.name),
+                !/(历史教案|历史|备份|原始题目|基础题库|\.bak)/.test(
+                  f.relativePath || f.name,
+                ),
             )
             .map((f) => (
               <label className="check-label" key={f.path}>
@@ -436,72 +163,6 @@ function Tools({ kind, lesson, files, onClose, onRefresh }) {
           {result}
         </div>
       )}
-      {layoutPath && (
-        <>
-          <Button
-            icon={FileText}
-            busy={checkingLayout}
-            onClick={() =>
-              run(async () => {
-                setCheckingLayout(true);
-                setLayoutPages([]);
-                try {
-                  await renderPDF(
-                    layoutPath,
-                    (image, page, total) =>
-                      setLayoutPages((v) => [...v, { image, page, total }]),
-                    () => {},
-                  );
-                } finally {
-                  setCheckingLayout(false);
-                }
-              })
-            }
-          >
-            版式检查 / 分页预览
-          </Button>
-          {layoutPages.map((p) => (
-            <div className="document-page" key={p.page}>
-              <small>
-                第 {p.page} / {p.total} 页 · 请检查分页、作答空间与答案残留
-              </small>
-              <img src={p.image} alt={"学案第 " + p.page + " 页"} />
-            </div>
-          ))}
-        </>
-      )}
-      {draft && (
-        <>
-          <Editor value={draft} onChange={setDraft} rows={15} />
-          <label className="check-label">
-            <input
-              type="checkbox"
-              checked={form.overwrite}
-              onChange={(e) => set("overwrite", e.target.checked)}
-            />
-            确认备份并覆盖原教案（将重排为标准 Word 文档）
-          </label>
-          <Button
-            icon={Save}
-            variant="primary"
-            disabled={!form.overwrite}
-            onClick={() =>
-              run(async () => {
-                await services.word(
-                  form.source.replace(/\.doc$/i, ".docx"),
-                  draft,
-                  true,
-                );
-                setDraft("");
-                setResult("已备份并保存");
-                onRefresh();
-              })
-            }
-          >
-            保存教案
-          </Button>
-        </>
-      )}
       <footer>
         <Button disabled={busy} onClick={onClose}>
           关闭
@@ -511,14 +172,14 @@ function Tools({ kind, lesson, files, onClose, onRefresh }) {
           variant={kind === "clean" ? "danger" : "primary"}
           onClick={execute}
         >
-          {kind === "improve" ? "生成教案草稿" : "执行" + actions[kind]}
+          {"执行" + actions[kind]}
         </Button>
       </footer>
     </Modal>
   );
 }
 function Detail({ lesson, onTool, onRefresh }) {
-  const { data, mutate, run } = useApp();
+  const { data, mutate, run, notify } = useApp();
   const { files, error, refresh } = useFiles(lesson.path, true);
   const [tag, setTag] = useState(""),
     [picker, setPicker] = useState(false),
@@ -792,7 +453,7 @@ function Detail({ lesson, onTool, onRefresh }) {
   );
 }
 export default function Lessons() {
-  const { data, mutate, run } = useApp();
+  const { data, mutate, run, notify } = useApp();
   const { lessons, error, loading, refresh } = useLessonIndex();
   const [view, setView] = useView("lessonLibrary", {
     stage: "初中",
@@ -816,6 +477,11 @@ export default function Lessons() {
   const stageLessons = lessons.filter((l) => l.stage === view.stage);
   const tags = [...new Set(stageLessons.flatMap((l) => l.tags || []))];
   const selected = lessons.find((l) => l.id === view.selected);
+  const ToolComponent = ["improve", "study"].includes(tool)
+    ? LessonDocumentTools
+    : tool === "pack"
+      ? LessonPack
+      : Tools;
   const filtered = stageLessons
     .filter(
       (l) =>
@@ -1024,14 +690,48 @@ export default function Lessons() {
           )}
         </div>
       </div>
-      {tool && (
-        <Tools
-          kind={tool}
-          lesson={selected}
-          files={toolFiles}
+      {tool === "create" ? (
+        <CreateLesson
+          stage={view.stage}
           onClose={() => setTool(null)}
-          onRefresh={refreshDetail}
+          onCreated={async ({ lesson }) => {
+            const next = await mutate((d) => {
+              const old = d.lessons.find((l) => l.path === lesson.path);
+              if (old) return d;
+              const order =
+                Math.max(
+                  -1,
+                  ...d.lessons
+                    .filter((l) => l.stage === lesson.stage)
+                    .map((l) => l.order || 0),
+                ) + 1;
+              return { ...d, lessons: [...d.lessons, { ...lesson, order }] };
+            });
+            const selected = next.lessons.find((l) => l.path === lesson.path);
+            setView((v) => ({
+              ...v,
+              stage: lesson.stage,
+              grade: lesson.grade,
+              collection: "",
+              query: "",
+              tags: [],
+              selected: selected.id,
+            }));
+            setTool(null);
+            refreshDetail();
+            notify("已在讲义库创建：" + lesson.name);
+          }}
         />
+      ) : (
+        tool && (
+          <ToolComponent
+            kind={tool}
+            lesson={selected}
+            files={toolFiles}
+            onClose={() => setTool(null)}
+            onRefresh={refreshDetail}
+          />
+        )
       )}
     </div>
   );

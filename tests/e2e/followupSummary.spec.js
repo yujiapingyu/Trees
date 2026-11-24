@@ -11,14 +11,20 @@ test("摘要填入九项、逐项复制、替换保护、失败保留草稿和�
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "followup-summary-")),
     profile = path.join(tmp, "profile");
   const response = {
-    purpose: "了解近期学习安排",
-    content: "沟通近期作业拖延的问题",
-    parentFeedback: "家长反馈最近作业经常拖延",
-    habits: "写作业前常玩手机",
-    keyInfo: "每天九点后才开始",
-    solution: "建议每天七点开始练习",
-    solutionFeedback: "家长同意试行一周",
-    plan: "下周复盘执行情况",
+    purpose:
+      "我这次主要想了解孩子在家的学习安排，围绕作业启动较晚的问题，与家长一起梳理更清楚的开始步骤。",
+    content:
+      "1. 我与家长沟通了近期作业拖延的情况，重点关注开始前玩手机对任务启动可能产生的影响。\n2. 我提出每天七点开始练习的建议，希望先把开始时间稳定下来。",
+    parentFeedback:
+      "家长向我反馈，孩子最近作业经常拖延，开始前会玩手机，通常九点后才开始。",
+    habits:
+      "根据家长向我反馈的情况，作业开始前使用手机、开始时间偏晚，是这次需要重点关注的学习习惯。",
+    keyInfo: "家长向我提到，孩子通常在九点后才开始作业。",
+    solution:
+      "1. 我建议每天七点开始练习，先明确要完成的任务，再着手处理。\n2. 在此基础上，可以尝试将手机暂时放在不易随手拿到的位置，减少开始前的干扰。",
+    solutionFeedback:
+      "家长向我表示同意先试行一周，具体执行情况还需要后续了解。",
+    plan: "我与家长约定下周复盘执行情况，重点了解是否按时开始，再据此讨论需要调整的做法。",
     notes: "保留原沟通日期",
   };
   let mode = "ok",
@@ -121,6 +127,8 @@ test("摘要填入九项、逐项复制、替换保护、失败保留草稿和�
       "2026-11-18",
     );
     expect(requests[0].messages.at(-1).content).toContain(summary);
+    expect(requests[0].messages.at(-1).content).toContain("教师第一人称");
+    expect(requests[0].messages.at(-1).content).toContain("可执行的步骤");
     expect(requests[0].messages.at(-1).content).not.toContain("测试学生乙");
     await page.getByLabel("沟通内容", { exact: true }).fill("教师手动修订");
     await page

@@ -41,11 +41,17 @@ export function dayDiff(a, b) {
       86400000,
   );
 }
-export function followupState(records, now = today(), stopped = false) {
+export function followupState(
+  records,
+  now = today(),
+  stopped = false,
+  plan = null,
+) {
   if (stopped) return { label: "已停课 · 只读", type: "muted", due: false };
   const last = [...records].sort((a, b) => b.date.localeCompare(a.date))[0];
-  if (!last) return { label: "从未回访", type: "warning", due: true };
-  const next = last.nextDate || addDays(last.date, 14);
+  if (!last && !plan?.date)
+    return { label: "从未回访", type: "warning", due: true };
+  const next = plan?.date || last.nextDate || addDays(last.date, 14);
   const delta = dayDiff(next, now);
   return {
     label: delta < 0 ? "已逾期" : delta <= 3 ? "即将联系" : "已安排",
@@ -53,7 +59,7 @@ export function followupState(records, now = today(), stopped = false) {
     due: delta <= 3,
     next,
     delta,
-    last: last.date,
+    last: last?.date,
   };
 }
 export function matches(value, query) {
@@ -158,6 +164,14 @@ export function removeRef(refs, lessonId, feedback) {
     throw Error("该讲义已被课堂反馈引用，请先处理对应反馈");
   return refs.filter((r) => r.lessonId !== lessonId);
 }
+const recentByDate = (items, n) =>
+  [...items]
+    .sort((a, b) =>
+      (b.date || b.createdAt || " ").localeCompare(
+        a.date || a.createdAt || " ",
+      ),
+    )
+    .slice(0, n);
 export function safeStudentContext(student, data) {
   const take = (key) => data[key].filter((x) => x.studentId === student.id);
   return {
@@ -186,14 +200,26 @@ export function safeStudentContext(student, data) {
             : null,
         };
       }),
+    sessions: recentByDate(
+      (data.sessions || []).filter((s) => s.studentId === student.id),
+      20,
+    ).map(({ closeout, ...record }) => record),
     lessons: take("refs"),
     homework: take("homework"),
-    feedback: take("feedback").slice(-10),
-    notes: take("notes").slice(-15),
-    followups: take("followups").slice(-8),
+    feedback: recentByDate(take("feedback"), 10).map(
+      ({ generatedOriginal, ...record }) => record,
+    ),
+    notes: recentByDate(take("notes"), 15),
+    followups: recentByDate(take("followups"), 8),
     wrongQuestions: take("wrongQuestions"),
     reports: take("reports")
-      .slice(-3)
+      .filter((r) => r.status !== "draft" && r.status !== "void")
+      .sort((a, b) =>
+        (b.reportDate || b.generatedAt || "").localeCompare(
+          a.reportDate || a.generatedAt || "",
+        ),
+      )
+      .slice(0, 3)
       .map(({ sourceSnapshot, ...report }) => report),
   };
 }
@@ -223,6 +249,8 @@ export function timeFilter(items, range, now = today(), n = 5) {
   );
 }
 export const EMPTY_DATA = {
+  sessions: [],
+  recycleBin: [],
   schools: [],
   students: [],
   lessons: [],

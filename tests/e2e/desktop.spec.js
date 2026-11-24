@@ -47,13 +47,46 @@ test("桌面真实文件闭环：创建改名、作业反馈、回访笔记、�
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.locator(".profile-title")).toContainText("测试学生");
     expect(await fs.readdir(root)).toContain("测试学生");
+    const personal = path.join(root, "测试学生");
+    await fs.writeFile(path.join(personal, "方程练习.txt"), "学生专属作业");
+    await fs.writeFile(path.join(personal, "参考答案.txt"), "学生专属答案");
     await page.getByRole("tab", { name: "作业 0" }).click();
     await page.getByRole("button", { name: "添加作业", exact: true }).click();
+    await expect(
+      page.getByRole("dialog").getByRole("combobox").locator("option:checked"),
+    ).toHaveText("测试学生的个人文件夹");
     await page
       .getByRole("dialog")
       .getByRole("button", { name: /方程练习/ })
       .click();
     await expect(page.locator(".homework-row")).toHaveCount(1);
+    const saved = await page.evaluate(
+      async () => (await window.services.bootstrap()).data,
+    );
+    expect(saved.homework[0].path).toBe(path.join(personal, "方程练习.txt"));
+    await page
+      .getByRole("button", { name: "关联参考答案", exact: true })
+      .click();
+    await expect(
+      page.getByRole("dialog").getByRole("combobox").locator("option:checked"),
+    ).toHaveText("测试学生的个人文件夹");
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: /参考答案.txt/ })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "打开答案", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "添加作业", exact: true }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("combobox")
+      .selectOption("textbooksJunior");
+    await expect(
+      page.getByRole("dialog").getByRole("button", { name: /方程练习/ }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "关闭弹窗" }).click();
+
     await page.getByRole("button", { name: "标记已完成", exact: true }).click();
     await expect(page.locator(".homework-row")).toContainText("已完成");
     await page.getByRole("tab", { name: "课堂反馈", exact: true }).click();
@@ -119,9 +152,9 @@ test("桌面真实文件闭环：创建改名、作业反馈、回访笔记、�
       "测试学生改名",
     );
     await expect(restored.locator(".homework-row")).toContainText("已完成");
-    const persisted = JSON.parse(
-      await fs.readFile(path.join(profile, "workspace.json"), "utf8"),
-    ).sm_workspace_v1;
+    const persisted = (
+      await restored.evaluate(() => window.services.bootstrap())
+    ).data;
     expect(persisted.students).toHaveLength(1);
     expect(persisted.feedback.length).toBe(1);
     expect(persisted.notes.length).toBe(1);

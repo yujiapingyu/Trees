@@ -1,3 +1,4 @@
+import { useDraft } from "../shared/drafts";
 import React, { useState } from "react";
 import {
   Plus,
@@ -25,12 +26,10 @@ import { Assistant } from "../components/AIPanel";
 export default function Notes() {
   const { data, mutate, run } = useApp();
   const [view, setView] = useView("studentNotes", { selected: "", query: "" });
-  const [form, setForm] = useState(null),
-    [remove, setRemove] = useState(null),
+  const [form, setForm] = useDraft("note-editor", null);
+  const [remove, setRemove] = useState(null),
     [assistant, setAssistant] = useState(false);
-  const student = data.students.find(
-    (s) => s.id === view.selected && s.status !== "已停课",
-  );
+  const student = data.students.find((s) => s.id === view.selected);
   const notes = data.notes
     .filter((n) => n.studentId === student?.id)
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -43,7 +42,7 @@ export default function Notes() {
       >
         <Button
           icon={Sparkles}
-          disabled={!student}
+          disabled={!student || student.status === "已停课"}
           onClick={() => setAssistant(true)}
         >
           AI 教学助手
@@ -51,7 +50,7 @@ export default function Notes() {
         <Button
           variant="primary"
           icon={Plus}
-          disabled={!student}
+          disabled={!student || student.status === "已停课"}
           onClick={() =>
             setForm({
               id: id(),
@@ -67,6 +66,7 @@ export default function Notes() {
       </PageHeader>
       <div className="two-panel">
         <StudentList
+          status="all"
           selected={view.selected}
           onSelect={(s) => setView((v) => ({ ...v, selected: s }))}
           query={view.query}
@@ -98,6 +98,7 @@ export default function Notes() {
                   <details
                     className="note-card"
                     key={n.id}
+                    data-search-key={"记录:" + n.id}
                     open={(view.expanded || []).includes(n.id)}
                     onToggle={(e) => {
                       const opened = e.currentTarget.open;
@@ -118,10 +119,18 @@ export default function Notes() {
                     </summary>
                     <Markdown>{n.markdown}</Markdown>
                     <div className="button-row">
-                      <Button icon={Pencil} onClick={() => setForm(n)}>
+                      <Button
+                        icon={Pencil}
+                        disabled={student.status === "已停课"}
+                        onClick={() => setForm(n)}
+                      >
                         编辑
                       </Button>
-                      <Button icon={Trash2} onClick={() => setRemove(n)}>
+                      <Button
+                        icon={Trash2}
+                        disabled={student.status === "已停课"}
+                        onClick={() => setRemove(n)}
+                      >
                         删除
                       </Button>
                     </div>
@@ -140,6 +149,9 @@ export default function Notes() {
       </div>
       {form && (
         <Modal title="学生记录" onClose={() => setForm(null)} wide>
+          <p className="form-hint">
+            编辑内容自动保存在本机；取消将丢弃此草稿。
+          </p>
           <div className="form-grid two">
             <Field label="标题">
               <input
@@ -170,6 +182,10 @@ export default function Notes() {
             <Button onClick={() => setForm(null)}>取消</Button>
             <Button
               icon={Save}
+              disabled={
+                data.students.find((s) => s.id === form.studentId)?.status ===
+                "已停课"
+              }
               variant="primary"
               onClick={() =>
                 run(async () => {

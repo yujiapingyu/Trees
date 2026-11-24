@@ -1,3 +1,4 @@
+import TeachingAutomation from "./components/TeachingAutomation";
 import React, { useEffect, useState } from "react";
 import {
   Users,
@@ -15,6 +16,8 @@ import {
   HelpCircle,
   PanelLeft,
   ArrowUpRight,
+  Search,
+  Sparkles,
 } from "lucide-react";
 import { useApp, useView } from "./shared/store";
 import { storage, services } from "./shared/services";
@@ -28,6 +31,10 @@ import Videos from "./pages/Videos";
 import Lessons from "./pages/Lessons";
 import Exams from "./pages/Exams";
 import Settings from "./pages/Settings";
+import GlobalSearch from "./components/GlobalSearch";
+import { Assistant } from "./components/AIPanel";
+import TeacherProfile from "./components/TeacherProfile";
+import { teacherDisplayName, teacherProfile } from "./shared/teacherProfile";
 export const NAV = [
   ["students", "学生管理", Users],
   ["followups", "回访管理", PhoneCall],
@@ -68,10 +75,95 @@ class Boundary extends React.Component {
   }
 }
 export default function App() {
-  const { loading, fatal, desktop, config, syncStudents, run } = useApp();
+  const {
+    data,
+    loading,
+    fatal,
+    desktop,
+    config,
+    syncStudents,
+    run,
+    storageState,
+  } = useApp();
   const [route, setRoute] = useView("route", "students"),
-    [help, setHelp] = useState(false);
+    [help, setHelp] = useState(false),
+    [search, setSearch] = useState(false),
+    [assistant, setAssistant] = useState(false),
+    [profileOpen, setProfileOpen] = useState(false),
+    [destination, setDestination] = useState(null),
+    [revision, setRevision] = useState(0);
   const navigate = (key) => setRoute(key);
+  const openResult = (result) =>
+    run(async () => {
+      if (result.target?.file) {
+        await services.open(result.target.file);
+        setSearch(false);
+        return;
+      }
+      const target = result.target;
+      if (!target?.route) return;
+      const previous = await storage.get("sm_view_state_" + target.route, {});
+      await storage.set("sm_view_state_" + target.route, {
+        ...previous,
+        ...target.view,
+      });
+      setSearch(false);
+      setAssistant(false);
+      setDestination(target.record ? result.key : null);
+      setRoute(target.route);
+      setRevision((v) => v + 1);
+    });
+  useEffect(() => {
+    const open = (e) => openResult(e.detail);
+    const keys = (e) => {
+      if (e.isComposing || e.repeat || e.altKey || !(e.metaKey || e.ctrlKey))
+        return;
+      if (document.querySelector('[role="dialog"]')) return;
+      if (e.key.toLowerCase() === "k" && !e.shiftKey) {
+        e.preventDefault();
+        setSearch(true);
+      }
+      if (e.key.toLowerCase() === "a" && e.shiftKey) {
+        e.preventDefault();
+        setAssistant(true);
+      }
+    };
+    window.addEventListener("workspace:open", open);
+    document.addEventListener("keydown", keys);
+    return () => {
+      window.removeEventListener("workspace:open", open);
+      document.removeEventListener("keydown", keys);
+    };
+  }, []);
+  useEffect(() => {
+    if (!destination) return;
+    let timer, highlighted;
+    const find = () => {
+      const el = [...document.querySelectorAll("[data-search-key]")].find(
+        (e) => e.dataset.searchKey === destination,
+      );
+      if (!el) return;
+      if (el.tagName === "DETAILS") el.open = true;
+      el.scrollIntoView({ block: "center" });
+      el.classList.add("search-highlight");
+      highlighted = el;
+      observer.disconnect();
+      clearTimeout(timer);
+      timer = setTimeout(() => el.classList.remove("search-highlight"), 4500);
+    };
+    const observer = new MutationObserver(find);
+    observer.observe(document.querySelector("main"), {
+      childList: true,
+      subtree: true,
+    });
+    find();
+    if (!highlighted) timer = setTimeout(() => observer.disconnect(), 6000);
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+      highlighted?.classList.remove("search-highlight");
+    };
+  }, [destination, revision]);
   const command = async (key) => {
     if (key === "textbooks" || key === "planning") {
       const current = await storage.get("sm_view_state_teachingResources", {
@@ -84,7 +176,9 @@ export default function App() {
       setRoute("teachingResources");
       window.dispatchEvent(new CustomEvent("resource:tab", { detail: key }));
     } else if (key === "assistant") {
-      setRoute("studentNotes");
+      setAssistant(true);
+    } else if (key === "search") {
+      setSearch(true);
     } else if (NAV.some((n) => n[0] === key) || key === "books") setRoute(key);
   };
   useEffect(() => {
@@ -136,6 +230,8 @@ export default function App() {
   const label =
     NAV.find((n) => n[0] === route)?.[1] ||
     (route === "books" ? "书籍" : "学生管理");
+  const profile = teacherProfile(data.teacherProfile),
+    displayName = teacherDisplayName(profile);
   const pages = {
     students: <Students navigate={navigate} />,
     followups: <Followups />,
@@ -179,8 +275,18 @@ export default function App() {
           ))}
         </div>
         <div className="nav-footer">
-          <div className="teacher-avatar">师</div>
-          <span>本地工作区</span>
+          <button
+            className="teacher-profile-entry"
+            aria-label="教师个人信息"
+            title={"教师个人信息 · " + displayName}
+            onClick={() => setProfileOpen(true)}
+          >
+            <span className="teacher-avatar">
+              {[...(profile.name || profile.displayName).trim()][0] || "师"}
+            </span>
+            <span className="teacher-profile-name">{displayName}</span>
+            <small>个人设置</small>
+          </button>
         </div>
       </nav>
       <div className="main-frame">
@@ -191,6 +297,20 @@ export default function App() {
             <span>{label}</span>
           </div>
           <div>
+            <Button
+              icon={Search}
+              onClick={() => setSearch(true)}
+              title="⌘/Ctrl + K"
+            >
+              全局搜索
+            </Button>
+            <Button
+              icon={Sparkles}
+              onClick={() => setAssistant(true)}
+              title="⌘/Ctrl + Shift + A"
+            >
+              AI 助手
+            </Button>
             <span className="current-date">
               {new Intl.DateTimeFormat("zh-CN", {
                 timeZone: "Asia/Shanghai",
@@ -222,8 +342,32 @@ export default function App() {
             </button>
           </div>
         )}
+        {(storageState?.pending || storageState?.backupError) && (
+          <div className="environment-banner storage-warning" role="alert">
+            <HardDrive size={18} />
+            <span>
+              <strong>
+                {storageState.pending
+                  ? "改动已保存在本机，尚未写入所选数据文件。"
+                  : "自动备份需要处理。"}
+              </strong>{" "}
+              {storageState.error || storageState.backupError}
+            </span>
+            <button
+              onClick={async () => {
+                await storage.set("sm_view_state_settings", "storage");
+                navigate("settings");
+                window.dispatchEvent(new Event("storage:settings"));
+              }}
+            >
+              数据与备份
+            </button>
+          </div>
+        )}
         <main className="main-content">
-          <Boundary key={route}>{pages[route] || pages.students}</Boundary>
+          <Boundary key={route + ":" + revision}>
+            {pages[route] || pages.students}
+          </Boundary>
         </main>
         <footer className="app-footer">
           <span>
@@ -233,9 +377,17 @@ export default function App() {
           <span>LOCAL FIRST · 为每一次教学积累</span>
         </footer>
       </div>
+      <TeachingAutomation key={storageState?.datasetId || "browser"} />
+      <GlobalSearch
+        open={search}
+        onClose={() => setSearch(false)}
+        onOpen={openResult}
+      />
+      {assistant && <Assistant onClose={() => setAssistant(false)} />}
+      {profileOpen && <TeacherProfile onClose={() => setProfileOpen(false)} />}
       {help && (
         <Modal title="欢迎使用知序" onClose={() => setHelp(false)}>
-          <Markdown>{`这是一个本地优先的教培工作台。\n\n1. 在配置中心选择学生、讲义与教学资源根目录。\n2. 学生文件夹自动扫描为档案，也可以直接新增。\n3. 选择学生后管理课程、作业、反馈、错题与报告。\n4. AI 与文档转换需要配置相应的服务和本地工具。\n\n**桌面版启动：** 在项目目录运行 npm install，再运行 npm run desktop。开发时使用 npm run desktop:dev。\n\n**快捷键：** 1 学生、2 回访、3 教学资源、4 学生记录、5 错题报告、6 视频、7 讲义库。输入时禁用。\n\n**书籍入口：** 桌面菜单「页面 → 书籍」。\n\n文件操作只作用于配置的根目录；删除进入系统废纸篓。配置与轻量记录保存到桌面应用用户数据目录，浏览器使用 localStorage。`}</Markdown>
+          <Markdown>{`这是一个本地优先的教培工作台。\n\n1. 在配置中心选择学生、讲义与教学资源根目录。\n2. 学生文件夹自动扫描为档案，也可以直接新增。\n3. 选择学生后管理课程、作业、反馈、错题与报告。\n4. AI 与文档转换需要配置相应的服务和本地工具。\n\n**桌面版启动：** 双击已安装的「知序」应用，无需终端。关闭窗口后驻留菜单栏，默认 ⌘⇧J 随时唤起，前台时再按隐藏；在「配置中心 → 启动与快捷键」修改快捷键或开启登录自动启动。彻底退出使用 ⌘Q。开发时使用 npm run desktop:dev。\n\n**快捷键：** 1 学生、2 回访、3 教学资源、4 学生记录、5 错题报告、6 视频、7 讲义库。输入时禁用。\n\n**书籍入口：** 桌面菜单「页面 → 书籍」。\n\n文件操作只作用于配置的根目录；删除进入系统废纸篓。业务记录使用 SQLite，在「配置中心 → 数据与备份」选择保存文件夹，也可选择云同步文件夹。讲义、试卷等附件仍在原资源目录；本机配置与凭据不随数据库同步。多台设备请轮流使用，退出一台并等待云同步完成后再打开另一台。浏览器预览使用 localStorage。`}</Markdown>
         </Modal>
       )}
     </div>

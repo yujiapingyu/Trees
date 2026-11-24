@@ -26,6 +26,7 @@ test("学校分学段管理、学生关联、两处新引用置顶和讲义事�
     path.join(profile, "workspace.json"),
   ).init();
   let requests = [];
+  let forceBad = false;
   const payload = {
     theme: "二项分布、超几何分布与正态分布",
     contentPoints: [
@@ -38,10 +39,7 @@ test("学校分学段管理、学生关联、两处新引用置顶和讲义事�
         details: ["不放回抽样的概率计算", "正态分布的对称性与常见概率性质"],
       },
     ],
-    strengths: [
-      "本节课整体学习情况较好。",
-      "建议继续保持对本节概率知识的学习投入。",
-    ],
+    strengths: ["本节课整体学习情况较好，可在这一基础上继续巩固本节知识。"],
     weaknesses: [
       "二项分布部分仍需要加强。",
       "建议重点巩固二项分布与超几何分布的适用条件。",
@@ -53,10 +51,21 @@ test("学校分学段管理、学生关联、两处新引用置顶和讲义事�
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body);
     requests.push(request);
+    const response =
+      forceBad || requests.length === 1
+        ? {
+            ...payload,
+            strengths: [
+              "本次课内容紧扣主题。",
+              "教师能够结合当前分数规划基础巩固。",
+              "讲义中的题型有层次。",
+            ],
+          }
+        : payload;
     res.setHeader("Content-Type", "application/json");
     res.end(
       JSON.stringify({
-        choices: [{ message: { content: JSON.stringify(payload) } }],
+        choices: [{ message: { content: JSON.stringify(response) } }],
       }),
     );
   });
@@ -176,17 +185,33 @@ test("学校分学段管理、学生关联、两处新引用置顶和讲义事�
     await page
       .getByRole("button", { name: "AI 整理家长反馈", exact: true })
       .click();
-    await expect(page.getByLabel("Markdown 正文")).toHaveValue(
+    await expect(page.getByLabel("家长反馈正文")).toHaveValue(
       /【上课时间】\n\d{4}年\d+月\d+日/,
     );
-    await expect(page.getByLabel("Markdown 正文")).toHaveValue(
+    await expect(page.getByLabel("家长反馈正文")).toHaveValue(
       /2、建议重点巩固/,
     );
-    expect(requests).toHaveLength(1);
+    expect(requests).toHaveLength(2);
     const prompt = requests[0].messages.at(-1).content;
     expect(prompt).toContain("正态分布的对称性");
     expect(prompt).toContain("实验高中");
     expect(prompt).toContain("优点和不足各写 2–3 条");
+    expect(requests[1].messages.at(-1).content).toContain(
+      "学员表现评价了讲义或教师",
+    );
+    const goodDraft = await page.getByLabel("家长反馈正文").inputValue();
+    expect(goodDraft).not.toContain("教师能够");
+    expect(goodDraft).not.toContain("讲义中的题型");
+    forceBad = true;
+    await page
+      .getByRole("button", { name: "AI 整理家长反馈", exact: true })
+      .click();
+    await expect(page.getByRole("status")).toContainText(
+      "反馈生成未通过检查，原草稿已保留",
+    );
+    await expect(page.getByLabel("家长反馈正文")).toHaveValue(goodDraft);
+    expect(requests).toHaveLength(4);
+    forceBad = false;
     await page.getByRole("button", { name: "保存反馈", exact: true }).click();
     await expect(page.getByText("反馈已保存", { exact: true })).toBeVisible();
     await page

@@ -5,18 +5,51 @@ import path from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { DiskStorage, run } = require("../../desktop/core.cjs");
-test("真实本地视频播放、进度续播、笔记与观看历史持久化", async ({page:generator}) => {
+test("真实本地视频播放、进度续播、笔记与观看历史持久化", async ({
+  page: generator,
+}) => {
   test.setTimeout(60000);
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "teaching-video-e2e-"));
   const profile = path.join(tmp, "profile"),
     root = path.join(tmp, "视频");
   await fs.mkdir(root);
   const file = path.join(root, "函数入门.webm");
-  await generator.goto('/');
-  const base64=await generator.evaluate(async()=>{
-    const canvas=document.createElement('canvas');canvas.width=320;canvas.height=180;const ctx=canvas.getContext('2d');ctx.fillStyle='#243852';ctx.fillRect(0,0,320,180);const stream=canvas.captureStream(10);const chunks=[];const recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8'});const complete=new Promise(resolve=>recorder.onstop=resolve);recorder.ondataavailable=e=>chunks.push(e.data);recorder.start();let frame=0;const timer=setInterval(()=>{ctx.fillStyle='#243852';ctx.fillRect(0,0,320,180);ctx.fillStyle='#a4bfe5';ctx.fillText(String(frame++),20,30);},100);await new Promise(resolve=>setTimeout(resolve,11000));recorder.stop();clearInterval(timer);await complete;stream.getTracks().forEach(t=>t.stop());const bytes=new Uint8Array(await new Blob(chunks,{type:'video/webm'}).arrayBuffer());let value='';for(const b of bytes)value+=String.fromCharCode(b);return btoa(value);
+  await generator.goto("/");
+  const base64 = await generator.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 180;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#243852";
+    ctx.fillRect(0, 0, 320, 180);
+    const stream = canvas.captureStream(10);
+    const chunks = [];
+    const recorder = new MediaRecorder(stream, {
+      mimeType: "video/webm;codecs=vp8",
+    });
+    const complete = new Promise((resolve) => (recorder.onstop = resolve));
+    recorder.ondataavailable = (e) => chunks.push(e.data);
+    recorder.start();
+    let frame = 0;
+    const timer = setInterval(() => {
+      ctx.fillStyle = "#243852";
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = "#a4bfe5";
+      ctx.fillText(String(frame++), 20, 30);
+    }, 100);
+    await new Promise((resolve) => setTimeout(resolve, 11000));
+    recorder.stop();
+    clearInterval(timer);
+    await complete;
+    stream.getTracks().forEach((t) => t.stop());
+    const bytes = new Uint8Array(
+      await new Blob(chunks, { type: "video/webm" }).arrayBuffer(),
+    );
+    let value = "";
+    for (const b of bytes) value += String.fromCharCode(b);
+    return btoa(value);
   });
-  await fs.writeFile(file,Buffer.from(base64,'base64'));
+  await fs.writeFile(file, Buffer.from(base64, "base64"));
   const store = await new DiskStorage(
     path.join(profile, "workspace.json"),
   ).init();
@@ -72,9 +105,8 @@ test("真实本地视频播放、进度续播、笔记与观看历史持久化",
     await expect
       .poll(() => restored.locator("video").evaluate((v) => v.currentTime))
       .toBeGreaterThan(6);
-    const saved = JSON.parse(
-      await fs.readFile(path.join(profile, "workspace.json"), "utf8"),
-    ).sm_workspace_v1;
+    const saved = (await restored.evaluate(() => window.services.bootstrap()))
+      .data;
     expect(saved.videoHistory).toHaveLength(1);
     expect(saved.videoHistory[0].time).toBeGreaterThan(6);
     expect(saved.videoNotes[file]).toContain("变量关系");

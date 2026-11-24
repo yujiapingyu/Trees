@@ -45,27 +45,86 @@ export async function extractDocumentText(file, checkCancel = () => {}) {
     await task.destroy();
   }
 }
+const textbookOutlineCache = new Map();
+export async function extractTextbookOutline(file) {
+  const key = file.path + ":" + file.modifiedAt + ":" + file.size;
+  if (textbookOutlineCache.has(key)) return textbookOutlineCache.get(key);
+  // Some local textbooks are 200–360 MB scans. Passing those through base64
+  // IPC would multiply memory use; their checked chapter summaries suffice.
+  if (/\.pdf$/i.test(file.path) && file.size > 32 * 1024 * 1024)
+    return { name: file.name, outline: "", source: "大体积教材使用核对目录" };
+  let pages = [];
+  if (/\.pdf$/i.test(file.path)) {
+    const task = await loadPDF(file.path);
+    try {
+      const doc = await task.promise;
+      for (let i = 1; i <= Math.min(12, doc.numPages); i++) {
+        const page = await doc.getPage(i),
+          content = await page.getTextContent();
+        pages.push({
+          page: i,
+          text: content.items.map((v) => v.str || "").join(" "),
+        });
+        page.cleanup();
+      }
+    } finally {
+      await task.destroy();
+    }
+  } else
+    pages = [
+      { page: 1, text: (await extractDocumentText(file.path)).slice(0, 16000) },
+    ];
+  const contents = pages.filter(
+    (p) =>
+      /目\s*录|CONTENTS/i.test(p.text) ||
+      (p.text.match(/第\s*[一二三四五六七八九十\d]+\s*章/g) || []).length >=
+        2 ||
+      /(?:…\s*){4,}/.test(p.text),
+  );
+  const outline = contents
+    .map((p) => `【目录页${p.page}】${p.text}`)
+    .join("\n")
+    .slice(0, 14000);
+  const result = {
+    name: file.name,
+    outline,
+    source: outline ? "本地教材目录" : "未提取到文字目录",
+  };
+  {
+    if (textbookOutlineCache.size >= 40)
+      textbookOutlineCache.delete(textbookOutlineCache.keys().next().value);
+    textbookOutlineCache.set(key, result);
+  }
+  return result;
+}
 export async function readLessonDocuments(lesson) {
-  if (!lesson?.path || lesson.missing)
-    throw Error("关联讲义路径不可用，请重新选择讲义");
-  const entries = await services.list(lesson.path, true);
+  if (!lesson || (!lesson.isExam && !lesson.path) || lesson.missing)
+    throw Error("关联讲义或试卷不可用，请检查来源或资源目录");
+  const entries = lesson.isExam
+    ? lesson.files.filter((f) => f.kind === "paper")
+    : await services.list(lesson.path, true);
   const files = entries.filter(
     (f) =>
       !f.isDirectory &&
       /\.(docx?|txt|md|pdf)$/i.test(f.name) &&
-      !/(历史|备份|\.bak)/.test(f.relativePath),
+      !/(历史|备份|原始题目|基础题库|\.bak)/.test(f.relativePath || f.name),
   );
   const plans = files.filter((f) => /教案/.test(f.name));
-  const chosen = (
-    plans.length ? plans : files.filter((f) => !/答案|解析|学案/.test(f.name))
-  ).slice(0, 3);
+  const chosen = lesson.isExam
+    ? files
+    : (plans.length
+        ? plans
+        : files.filter((f) => !/答案|解析|学案/.test(f.name))
+      ).slice(0, 3);
   if (!chosen.length)
     throw Error(
-      "关联讲义中没有可读取的教案或讲义正文，请添加 DOC、DOCX、PDF、TXT 或 Markdown 文件",
+      "关联讲义或试卷中没有可读取的正文，请添加 DOC、DOCX、PDF、TXT 或 Markdown 文件",
     );
   const documents = [];
   for (const f of chosen) {
     try {
+      if (f.unavailable)
+        throw Error("文件不在当前考试资料根目录内，请检查配置");
       const text = await extractDocumentText(f.path);
       documents.push({
         name: f.name,

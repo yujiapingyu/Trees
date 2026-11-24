@@ -41,7 +41,11 @@ export default function StudentExams({ student }) {
           if (!exam) return <p key={r.id}>考试信息缺失，请恢复考试记录。</p>;
           const total = examTotal(r, exam);
           return (
-            <article className="record-card" key={r.id}>
+            <article
+              className="record-card"
+              key={r.id}
+              data-search-key={"成绩:" + r.id}
+            >
               <div className="section-head">
                 <div>
                   <h3>{exam.name}</h3>

@@ -1,5 +1,5 @@
 import { copyExamFiles, appendExamFiles } from "../shared/examFiles";
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Plus, Files, FolderOpen, Pencil, Archive, Trash2 } from "lucide-react";
 import { useApp, useView } from "../shared/store";
 import { id, today, matches } from "../shared/domain";
@@ -9,6 +9,7 @@ import {
   gradeLabel,
   saveExam,
   deleteExam,
+  removeExamFile,
   paperGroups,
 } from "../shared/exams";
 import { services, join, basename } from "../shared/services";
@@ -42,6 +43,7 @@ function ExamForm({ exam, onClose, onSaved }) {
             subjects: [{ id: id(), name: "数学", maxScore: 150, files: [] }],
             notes: "",
             archived: false,
+            stage: "",
           },
     ),
     [error, setError] = useState(""),
@@ -397,6 +399,7 @@ export default function Exams() {
     grade: "",
     school: "",
     archived: false,
+    stage: "",
   });
   const [form, setForm] = useState(null),
     [files, setFiles] = useState(false),
@@ -408,12 +411,28 @@ export default function Exams() {
     .filter(
       (e) =>
         (view.archived || !e.archived) &&
+        (!view.stage || schoolStageForGrade(e.grade) === view.stage) &&
         (!view.grade || e.grade === view.grade) &&
         (!view.school || e.schoolIds.includes(view.school)) &&
         matches(e.name + " " + e.organizer + " " + e.date, view.query),
     )
     .sort((a, b) => b.date.localeCompare(a.date));
   const set = (k, v) => setView((x) => ({ ...x, [k]: v }));
+  useEffect(() => {
+    if (view.selected && !filtered.some((e) => e.id === view.selected))
+      set("selected", "");
+  }, [view.stage, view.grade, view.school, view.query, view.archived]);
+  const grades = EXAM_GRADES.filter(
+    (g) => !view.stage || schoolStageForGrade(g) === view.stage,
+  );
+  const gradeCount = (g) =>
+    data.exams.filter(
+      (e) =>
+        e.grade === g &&
+        (view.archived || !e.archived) &&
+        (!view.school || e.schoolIds.includes(view.school)) &&
+        matches(e.name + " " + e.organizer + " " + e.date, view.query),
+    ).length;
   return (
     <div className="page">
       <PageHeader
@@ -425,6 +444,47 @@ export default function Exams() {
           新建考试
         </Button>
       </PageHeader>
+      <div
+        className="stage-switch exam-stage-switch"
+        role="group"
+        aria-label="考试学段分类"
+      >
+        {[
+          ["", "全部学段"],
+          ["初中", "初中"],
+          ["高中", "高中"],
+        ].map(([k, label]) => (
+          <button
+            key={k}
+            className={view.stage === k || (!view.stage && !k) ? "active" : ""}
+            aria-pressed={(view.stage || "") === k}
+            onClick={() =>
+              setView((v) => ({ ...v, stage: k, grade: "", selected: "" }))
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div
+        className="exam-grade-categories"
+        role="group"
+        aria-label="考试年级分类"
+      >
+        <Button onClick={() => set("grade", "")} aria-pressed={!view.grade}>
+          全部年级
+        </Button>
+        {grades.map((g) => (
+          <Button
+            key={g}
+            aria-pressed={view.grade === g}
+            variant={view.grade === g ? "primary" : ""}
+            onClick={() => set("grade", g)}
+          >
+            {gradeLabel(g)}（{gradeCount(g)}）
+          </Button>
+        ))}
+      </div>
       <div className="exam-management-layout">
         <aside className="panel exam-list-panel">
           <SearchBox
@@ -439,7 +499,7 @@ export default function Exams() {
               onChange={(e) => set("grade", e.target.value)}
             >
               <option value="">全部年级</option>
-              {EXAM_GRADES.map((g) => (
+              {grades.map((g) => (
                 <option key={g} value={g}>
                   {gradeLabel(g)}
                 </option>
@@ -474,22 +534,41 @@ export default function Exams() {
                 description="先添加学校，再创建联盟统考或学校独立考试。"
               />
             ) : (
-              filtered.map((e) => (
-                <button
-                  className={
-                    "exam-list-entry " + (exam?.id === e.id ? "selected" : "")
-                  }
-                  key={e.id}
-                  onClick={() => set("selected", e.id)}
-                >
-                  <strong>{e.name}</strong>
-                  <small>
-                    {e.date} · {gradeLabel(e.grade)} ·{" "}
-                    {e.kind === "alliance" ? "联盟统考" : "学校独考"}
-                    {e.archived ? " · 已归档" : ""}
-                  </small>
-                </button>
-              ))
+              grades
+                .filter((g) => filtered.some((e) => e.grade === g))
+                .map((g) => (
+                  <section
+                    className="exam-grade-group"
+                    key={g}
+                    aria-label={gradeLabel(g) + "考试"}
+                  >
+                    <h3>
+                      {gradeLabel(g)}{" "}
+                      <small>
+                        {filtered.filter((e) => e.grade === g).length}场
+                      </small>
+                    </h3>
+                    {filtered
+                      .filter((e) => e.grade === g)
+                      .map((e) => (
+                        <button
+                          className={
+                            "exam-list-entry " +
+                            (exam?.id === e.id ? "selected" : "")
+                          }
+                          key={e.id}
+                          onClick={() => set("selected", e.id)}
+                        >
+                          <strong>{e.name}</strong>
+                          <small>
+                            {e.date} · {gradeLabel(e.grade)} ·{" "}
+                            {e.kind === "alliance" ? "联盟统考" : "学校独考"}
+                            {e.archived ? " · 已归档" : ""}
+                          </small>
+                        </button>
+                      ))}
+                  </section>
+                ))
             )}
           </div>
         </aside>
@@ -705,7 +784,16 @@ export default function Exams() {
         <ExamForm
           exam={form.id ? form : null}
           onClose={() => setForm(null)}
-          onSaved={(key) => set("selected", key)}
+          onSaved={(key) =>
+            setView((v) => ({
+              ...v,
+              selected: key,
+              stage: "",
+              grade: "",
+              school: "",
+              query: "",
+            }))
+          }
         />
       )}
       {files && exam && (
@@ -727,7 +815,7 @@ export default function Exams() {
           title={remove.exam ? "删除考试" : "移除文件关联"}
           description={
             remove.exam
-              ? "有学生成绩时不能删除，请使用归档。删除考试登记不会删除磁盘文件。"
+              ? "有学生成绩或课程讲义引用时不能删除，请使用归档。删除考试登记不会删除磁盘文件。"
               : "只移除考试中的此文件关联，原始文件和保存的副本均保留。"
           }
           onClose={() => setRemove(null)}
@@ -735,26 +823,7 @@ export default function Exams() {
             mutate((d) =>
               remove.exam
                 ? deleteExam(d, remove.exam.id)
-                : {
-                    ...d,
-                    exams: d.exams.map((e) =>
-                      e.id === exam.id
-                        ? {
-                            ...e,
-                            subjects: e.subjects.map((s) =>
-                              s.id === remove.subjectId
-                                ? {
-                                    ...s,
-                                    files: s.files.filter(
-                                      (f) => f.id !== remove.file.id,
-                                    ),
-                                  }
-                                : s,
-                            ),
-                          }
-                        : e,
-                    ),
-                  },
+                : removeExamFile(d, exam.id, remove.subjectId, remove.file.id),
             )
           }
         />

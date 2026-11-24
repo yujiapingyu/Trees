@@ -32,7 +32,7 @@ export function saveSchool(data, form) {
       (data.exams || []).some((e) => e.schoolIds.includes(existing.id)))
   )
     throw Error("已有学生或考试关联该学校，不能直接更改学段");
-  const school = { id: form.id || id(), name, stage };
+  const school = { ...existing, id: form.id || id(), name, stage };
   return {
     ...data,
     schools: existing

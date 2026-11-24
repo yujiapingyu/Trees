@@ -11,6 +11,7 @@ import {
 import { useApp, useView } from "../shared/store";
 import { services, parent, basename } from "../shared/services";
 import { matches } from "../shared/domain";
+import { studentDirectoryState } from "../shared/paths";
 import {
   Button,
   IconButton,
@@ -267,12 +268,23 @@ export function FileBrowser({
 }
 export function ResourcePicker({
   title = "选择资源",
+  student,
   onSelect,
   onClose,
   allowFolders = true,
 }) {
   const { config } = useApp();
   const roots = [
+    ...(student &&
+    studentDirectoryState(student, config.studentsRoot) === "available"
+      ? [
+          [
+            "student:" + student.id,
+            student.name + "的个人文件夹",
+            student.directoryPath,
+          ],
+        ]
+      : []),
     ["textbooksJunior", "初中课本"],
     ["textbooksSenior", "高中课本"],
     ["exercisesJunior", "初中练习"],
@@ -284,7 +296,7 @@ export function ResourcePicker({
     ["booksRoot", "书籍"],
   ];
   const [key, setKey] = useState(
-    roots.find(([k]) => config[k])?.[0] || "textbooksJunior",
+    roots.find(([k, , path]) => path || config[k])?.[0] || "textbooksJunior",
   );
   return (
     <Modal title={title} onClose={onClose} wide>
@@ -293,13 +305,16 @@ export function ResourcePicker({
           {roots.map(([k, l]) => (
             <option key={k} value={k}>
               {l}
-              {!config[k] ? "（未配置）" : ""}
+              {!roots.find((r) => r[0] === k)?.[2] && !config[k]
+                ? "（未配置）"
+                : ""}
             </option>
           ))}
         </select>
       </Field>
       <FileBrowser
-        root={config[key]}
+        key={key}
+        root={roots.find((r) => r[0] === key)?.[2] || config[key]}
         title={title}
         viewKey={"picker_" + key}
         onSelect={(f) => {

@@ -1,3 +1,4 @@
+import { useDraft } from "../shared/drafts";
 import React, { useState, useEffect, useRef } from "react";
 import {
   Phone,
@@ -43,6 +44,7 @@ import { services } from "../shared/services";
 import {
   FOLLOWUP_FIELDS as fields,
   followupSummaryPrompt,
+  followupCallPrompt,
   validateFollowupSummary,
 } from "../shared/followupSummary";
 function Detail({ student }) {
@@ -62,10 +64,10 @@ function Detail({ student }) {
     plan: "",
     notes: "",
   });
-  const [form, setForm] = useState(empty),
-    [script, setScript] = useState(""),
-    [remove, setRemove] = useState(null),
-    [summary, setSummary] = useState(""),
+  const [form, setForm] = useDraft("followup:" + student.id, empty);
+  const [summary, setSummary] = useDraft("followup-summary:" + student.id, "");
+  const [script, setScript] = useState("");
+  const [remove, setRemove] = useState(null),
     [generating, setGenerating] = useState(false),
     [summaryError, setSummaryError] = useState(""),
     [pendingFields, setPendingFields] = useState(null);
@@ -110,10 +112,18 @@ function Detail({ student }) {
   const records = data.followups
     .filter((f) => f.studentId === student.id)
     .sort((a, b) => b.date.localeCompare(a.date));
-  const state = followupState(records, today(), student.status === "已停课");
+  const state = followupState(
+    records,
+    today(),
+    student.status === "已停课",
+    student.followupPlan,
+  );
   const stopped = student.status === "已停课";
   return (
     <div className="followup-detail">
+      <p className="form-hint" role="status">
+        未提交的回访内容和摘要自动保存在本机，可切换页面后继续。
+      </p>
       <div className="student-profile card">
         <Avatar student={student} size="large" />
         <div className="grow">
@@ -133,17 +143,25 @@ function Detail({ student }) {
           下次建议 <b>{state.next || "尽快联系"}</b>
         </span>
       </div>
+      {student.followupPlan && (
+        <p className="info-banner">
+          下次联系计划：{student.followupPlan.date} ·{" "}
+          {student.followupPlan.topic}
+        </p>
+      )}
       {stopped && (
         <div className="info-banner">该学生已停课，仅可查看历史回访。</div>
       )}
-      <Section title="电话沟通准备" subtitle="结合当前学生的近期教学记录">
+      <Section
+        title="电话沟通准备"
+        subtitle="结合本次填写的摘要与近期记录，以教师第一人称生成具体话术"
+      >
         <div className="button-row">
           <AIAction
             label="生成沟通提纲与话术"
             disabled={stopped || generating}
             task={() =>
-              "基于以下真实学生数据生成电话提纲和自然口语化家长话术。缺失数据明确标注，不能编造。\n" +
-              JSON.stringify(safeStudentContext(student, data))
+              followupCallPrompt(safeStudentContext(student, data), summary)
             }
             onResult={setScript}
           />
@@ -167,7 +185,7 @@ function Detail({ student }) {
       </Section>
       <Section
         title="摘要整理"
-        subtitle="输入实际回访摘要，AI 将归类填入下方九项；未提及的信息留空"
+        subtitle="根据摘要，以教师第一人称丰富表达、展开具体建议，并填入九项"
       >
         <Field label="回访内容摘要">
           <textarea
@@ -204,7 +222,7 @@ function Detail({ student }) {
           />
         )}
         <p className="form-hint">
-          只整理当前输入的摘要，不自动保存记录；已有填写内容时会先展示替换预览。
+          基于本次摘要扩写，新增做法会表述为建议；不补造家长态度或已发生的事实。不自动保存，已有内容时会先展示替换预览。
         </p>
       </Section>
       <Section title="回访记录" subtitle="记录沟通的事实，也记录接下来的行动">
@@ -266,12 +284,27 @@ function Detail({ student }) {
                   throw Error("请填写日期与沟通内容");
                 if (form.nextDate && form.nextDate < form.date)
                   throw Error("下次联系日期不能早于回访日期");
-                await mutate((d) => ({
-                  ...d,
-                  followups: d.followups.some((r) => r.id === form.id)
+                await mutate((d) => {
+                  const existing = d.followups.some((r) => r.id === form.id);
+                  d.followups = existing
                     ? d.followups.map((r) => (r.id === form.id ? form : r))
-                    : [...d.followups, form],
-                }));
+                    : [...d.followups, form];
+                  if (!existing)
+                    d.students = d.students.map((s) => {
+                      if (
+                        s.id !== student.id ||
+                        !s.followupPlan ||
+                        form.date <
+                          (s.followupPlan.createdDate ||
+                            s.followupPlan.createdAt.slice(0, 10))
+                      )
+                        return s;
+                      const next = { ...s };
+                      delete next.followupPlan;
+                      return next;
+                    });
+                  return d;
+                });
                 setForm(empty());
                 setSummary("");
                 setSummaryError("");
@@ -301,7 +334,11 @@ function Detail({ student }) {
           />
         ) : (
           records.map((r) => (
-            <details className="record-card" key={r.id}>
+            <details
+              className="record-card"
+              key={r.id}
+              data-search-key={"回访:" + r.id}
+            >
               <summary>
                 <strong>
                   {r.date} · {r.purpose || "家长回访"}
@@ -409,6 +446,7 @@ export default function Followups() {
       data.followups.filter((f) => f.studentId === s.id),
       today(),
       s.status === "已停课",
+      s.followupPlan,
     );
   const due = active.filter((s) => getState(s).due),
     overdue = active.filter(

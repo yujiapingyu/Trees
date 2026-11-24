@@ -46,19 +46,15 @@ test("讲义从模板创建、转学案版式预览、学生分配及反馈引�
     await page.getByRole("button", { name: "新建讲义", exact: true }).click();
     await page.getByLabel("讲义名称", { exact: true }).fill("一元一次方程");
     await page
-      .getByLabel("DOC / DOCX 模板", { exact: true })
+      .getByLabel("讲义模板", { exact: true })
       .selectOption({ label: "数学教案.docx" });
-    await page.getByRole("button", { name: "执行新建讲义" }).click();
-    await expect(page.getByRole("dialog").getByRole("status")).toContainText(
-      "讲义已创建",
+    await page.getByRole("button", { name: "创建", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.locator(".lesson-detail-header h2")).toHaveText(
+      "一元一次方程",
     );
-    await page
-      .getByRole("dialog")
-      .getByRole("button", { name: "关闭", exact: true })
-      .click();
-    await page.locator(".lesson-list-item").click();
     await page.getByRole("button", { name: "转学案", exact: true }).click();
-    await page.getByRole("button", { name: "执行教案转学案" }).click();
+    await page.getByRole("button", { name: "复制并处理" }).click();
     await expect(page.getByRole("dialog").getByRole("status")).toContainText(
       "共识别 2 道题",
     );
@@ -100,7 +96,13 @@ test("讲义从模板创建、转学案版式预览、学生分配及反馈引�
     );
     expect(
       await fs.readFile(
-        path.join(root, "初中", "初一", "一元一次方程", "数学教案.docx"),
+        path.join(
+          root,
+          "初中",
+          "初一",
+          "一元一次方程",
+          "一元一次方程（教案）.docx",
+        ),
       ),
     ).toBeTruthy();
   } finally {

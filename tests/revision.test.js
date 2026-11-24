@@ -30,7 +30,7 @@ const sample = {
     },
     { topic: "超几何分布", details: ["不放回抽样与概率计算"] },
   ],
-  strengths: ["本节课整体学习情况较好。", "建议继续保持对本节知识的学习投入。"],
+  strengths: ["本节课整体学习情况较好，可在这一基础上继续巩固所学知识。"],
   weaknesses: [
     "二项分布部分需要加强。",
     "建议重点巩固二项分布与超几何分布的适用条件。",
@@ -80,7 +80,7 @@ test("新引用始终置顶，已有拖拽顺序和原引用仍保留", () => {
   assert.throws(() => addLessonReference(d, "s", "b"), /重复/);
   assert.equal(d.refs[0].studentId, "s");
 });
-test("家长反馈固定日期、分点正文、优缺点各2至3条且只使用当前学生", () => {
+test("家长反馈固定日期、分点正文、以学生表现为中心且不强凑条数", () => {
   const student = { name: "测试学生", grade: "高中二年级" };
   const prompt = feedbackPrompt({
     student,
@@ -100,9 +100,14 @@ test("家长反馈固定日期、分点正文、优缺点各2至3条且只使用
   assert.ok(!text.includes("待补充"));
   assert.ok(!text.includes("\\"));
   assert.match(text, /1、二项分布/);
+  assert.equal(
+    validateFeedback({ ...sample, strengths: ["本次整体学习效果较好。"] })
+      .strengths.length,
+    1,
+  );
   assert.throws(
-    () => validateFeedback({ ...sample, strengths: ["仅一条"] }),
-    /2–3/,
+    () => validateFeedback({ ...sample, strengths: ["一", "二", "三", "四"] }),
+    /0–3/,
   );
   assert.throws(() => feedbackDate("2026-02-30"), /无效/);
   assert.throws(

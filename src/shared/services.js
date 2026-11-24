@@ -10,14 +10,36 @@ export function sanitizeConfig(value = {}) {
 export const desktop = !!window.services;
 const unavailable = async () => {
   throw Error(
-    "本功能需要桌面文件服务。请使用 npm run desktop 启动桌面版，并在配置中心设置本地目录。",
+    "本功能需要桌面文件服务。请打开已安装的「知序」桌面应用，并在配置中心设置本地目录。",
   );
 };
 export const services =
   window.services ||
   Object.fromEntries(
     [
+      "desktopState",
+      "desktopSave",
+      "storageState",
+      "studentArchive",
+      "studentRestore",
+      "storageBackups",
+      "storageBackupPreview",
+      "fullBackupExport",
+      "fullBackupInspect",
+      "fullBackupRestore",
+      "storageChoose",
+      "storageApply",
+      "storageRetry",
+      "storageReveal",
       "study",
+      "lessonPackOptions",
+      "lessonPack",
+      "lessonCreateOptions",
+      "lessonCreate",
+      "lessonPrepare",
+      "lessonGenerate",
+      "lessonSave",
+      "lessonDiscard",
       "list",
       "check",
       "open",
@@ -30,6 +52,7 @@ export const services =
       "sheet",
       "pdf",
       "word",
+      "learningReport",
       "writeJSON",
       "ai",
       "cancelAI",
@@ -37,6 +60,7 @@ export const services =
       "mediaURL",
     ].map((k) => [k, unavailable]),
   );
+let storageEpoch;
 export const storage = {
   async get(key, fallback) {
     if (desktop) {
@@ -49,12 +73,13 @@ export const storage = {
     }
   },
   async set(key, value) {
-    if (desktop) return services.storageSet(key, value);
+    if (desktop) return services.storageSet(key, value, storageEpoch);
     localStorage.setItem(key, JSON.stringify(value));
   },
   async bootstrap() {
     if (desktop) {
       const result = await services.bootstrap();
+      storageEpoch = result.storageEpoch;
       return {
         ...result,
         data: { ...structuredClone(EMPTY_DATA), ...(result.data || {}) },

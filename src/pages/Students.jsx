@@ -1,3 +1,7 @@
+import QuickLesson from "../components/QuickLesson";
+import PreparationCard from "../components/PreparationCard";
+import CurriculumProgress from "../components/CurriculumProgress";
+import TeachingSessions from "../components/TeachingSessions";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Plus,
@@ -21,22 +25,20 @@ import {
   Sparkles,
   Copy,
   Settings2,
+  ClipboardList,
 } from "lucide-react";
 import { useApp, useView } from "../shared/store";
-import {
-  GRADES,
-  STATUSES,
-  id,
-  uniqueRef,
-  removeRef,
-  matches,
-} from "../shared/domain";
-import { services } from "../shared/services";
+import { GRADES, STATUSES, id, uniqueRef, matches } from "../shared/domain";
+import { services, storage } from "../shared/services";
 import { isWithinRoot, studentDirectoryState } from "../shared/paths";
 import { useCourses, useFiles, useLessonIndex } from "../shared/hooks";
 import StudentList, { Avatar } from "../components/StudentList";
 import SchoolManager from "../components/SchoolManager";
 import StudentExams from "../components/StudentExams";
+import ExamCoursePicker from "../components/ExamCoursePicker";
+import ExamCourseFiles from "../components/ExamCourseFiles";
+import { removeCourseReference } from "../shared/examReferences";
+import { reportTask } from "../shared/reports";
 import {
   SCHOOL_STAGES,
   schoolForStudent,
@@ -329,7 +331,14 @@ function LessonPicker({ student, onClose }) {
     </Modal>
   );
 }
-function CourseFiles({ course, student }) {
+function CourseFiles(props) {
+  return props.course?.isExam ? (
+    <ExamCourseFiles course={props.course} />
+  ) : (
+    <LessonCourseFiles {...props} />
+  );
+}
+function LessonCourseFiles({ course, student }) {
   const { run, config } = useApp();
   const accessible =
     course &&
@@ -457,7 +466,15 @@ function CourseFiles({ course, student }) {
   );
 }
 export default function Students({ navigate }) {
-  const { data, config, mutate, run, syncStudents, deleteStudent } = useApp();
+  const {
+    data,
+    config,
+    mutate,
+    run,
+    syncStudents,
+    deleteStudent,
+    restoreStudent,
+  } = useApp();
   const [view, setView] = useView("students", {
     selected: "",
     query: "",
@@ -507,6 +524,20 @@ export default function Students({ navigate }) {
         description="把每一次教学，连成清晰的成长轨迹。"
         eyebrow="STUDENT WORKSPACE"
       >
+        <Button
+          icon={Pencil}
+          disabled={!student || student.status === "已停课"}
+          onClick={() => setModal("quickLesson")}
+        >
+          课后记一段
+        </Button>
+        <Button onClick={() => setModal("recycle")}>
+          学生回收站（{(data.recycleBin || []).length}）
+        </Button>
+        <Button icon={FileText} onClick={() => setModal("reportTasks")}>
+          学习力报告待办{" "}
+          {data.students.filter((s) => reportTask(s, data).due).length}
+        </Button>
         <Button
           icon={RefreshCw}
           onClick={() => run(syncStudents, "学生目录已刷新")}
@@ -614,13 +645,22 @@ export default function Students({ navigate }) {
           <div className="course-caption">
             {student ? student.name + "的教学安排" : "选择学生后查看课程"}
           </div>
+          <div className="button-row" style={{ padding: "0 14px 12px" }}>
+            <Button
+              icon={ClipboardList}
+              disabled={!student || student.status === "已停课"}
+              onClick={() => setModal("examCourse")}
+            >
+              引用考试
+            </Button>
+          </div>
           <div className="course-list-items">
             {error && <ErrorBox message={error} />}
             {!courses.length ? (
               <Empty
                 icon={BookOpen}
                 title="暂无课程讲义"
-                description="从讲义库关联，或放入学生文件夹。"
+                description="从讲义库关联、引用考试试卷，或放入学生文件夹。"
               />
             ) : (
               courses.map((c, i) => (
@@ -658,9 +698,11 @@ export default function Students({ navigate }) {
                       <small>
                         {c.missing
                           ? "来源缺失"
-                          : c.isRef
-                            ? "讲义库引用"
-                            : "本地课程"}
+                          : c.isExam
+                            ? "考试试卷引用"
+                            : c.isRef
+                              ? "讲义库引用"
+                              : "本地课程"}
                       </small>
                     </span>
                     <GripVertical size={14} />
@@ -742,6 +784,26 @@ export default function Students({ navigate }) {
                     </span>
                   </div>
                 </div>
+                <Button
+                  icon={Phone}
+                  onClick={() =>
+                    run(async () => {
+                      const previous = await storage.get(
+                        "sm_view_state_followups",
+                        {},
+                      );
+                      await storage.set("sm_view_state_followups", {
+                        ...previous,
+                        selected: student.id,
+                        query: "",
+                        filter: "all",
+                      });
+                      navigate("followups");
+                    })
+                  }
+                >
+                  回访
+                </Button>
                 <IconButton
                   icon={Pencil}
                   label="编辑学生档案"
@@ -765,6 +827,8 @@ export default function Students({ navigate }) {
               <Tabs
                 items={[
                   { key: "overview", label: "课程概览" },
+                  { key: "sessions", label: "授课记录" },
+                  { key: "curriculum", label: "教材进度" },
                   { key: "homework", label: "作业 " + count("homework") },
                   { key: "feedback", label: "课堂反馈" },
                   { key: "wrong", label: "错题" },
@@ -819,8 +883,21 @@ export default function Students({ navigate }) {
                     已停课，教学记录保留。恢复授课后可继续新增教学活动。
                   </div>
                 )}
+                <PreparationCard
+                  student={student}
+                  courses={courses}
+                  expanded={view.tab === "overview"}
+                  onRecord={() => setModal("quickLesson")}
+                  onFeedback={() => change("tab", "feedback")}
+                />
                 {view.tab === "overview" && (
                   <CourseFiles course={course} student={student} />
+                )}
+                {view.tab === "curriculum" && (
+                  <CurriculumProgress key={student.id} student={student} />
+                )}
+                {view.tab === "sessions" && (
+                  <TeachingSessions student={student} courses={courses} />
                 )}
                 {view.tab === "exams" && <StudentExams student={student} />}
                 {view.tab === "homework" && <HomeworkPanel student={student} />}
@@ -835,8 +912,12 @@ export default function Students({ navigate }) {
                 {view.tab === "wrong" && (
                   <WrongPanel student={student} course={course} />
                 )}
-                {view.tab === "reports" && <ReportPanel student={student} />}
-                {view.tab === "analysis" && <AnalysisPanel student={student} />}
+                {view.tab === "reports" && (
+                  <ReportPanel student={student} courses={courses} />
+                )}
+                {view.tab === "analysis" && (
+                  <AnalysisPanel student={student} courses={courses} />
+                )}
                 <div className="assistant-banner">
                   <span className="assistant-spark">
                     <Sparkles size={21} />
@@ -886,6 +967,32 @@ export default function Students({ navigate }) {
           )}
         </div>
       </div>
+      {modal === "recycle" && (
+        <Modal title="学生回收站" onClose={() => setModal(null)} wide>
+          <p>
+            恢复时会一并恢复学生目录和所有关联记录；同名档案或目录存在时不会覆盖。请保持原学生根目录可访问。
+          </p>
+          {!(data.recycleBin || []).length && <Empty title="回收站为空" />}
+          {(data.recycleBin || []).map((item) => (
+            <div className="record-card" key={item.id}>
+              <strong>{item.name}</strong>
+              <p>
+                {new Date(item.deletedAt).toLocaleString("zh-CN")} · 授课{" "}
+                {item.records.sessions?.length || 0} · 反馈{" "}
+                {item.records.feedback?.length || 0} · 回访{" "}
+                {item.records.followups?.length || 0}
+              </p>
+              <Button
+                onClick={() =>
+                  run(() => restoreStudent(item), "学生及关联记录已恢复")
+                }
+              >
+                恢复学生
+              </Button>
+            </div>
+          ))}
+        </Modal>
+      )}
       {(modal === "new" || modal === "edit") && (
         <StudentForm
           student={modal === "edit" ? student : null}
@@ -893,8 +1000,62 @@ export default function Students({ navigate }) {
           onSaved={(s) => s && change("selected", s.id)}
         />
       )}
+      {modal === "quickLesson" && student && (
+        <QuickLesson
+          student={student}
+          courses={courses}
+          course={course}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === "reportTasks" && (
+        <Modal title="学习力报告待办" onClose={() => setModal(null)} wide>
+          <p className="form-hint">
+            入学报告依据已确认授课次数提醒；阶段报告依据正式报告和已登记历史报告的日期提醒。草稿不计入完成。
+          </p>
+          {data.students
+            .filter((s) => s.status !== "已停课")
+            .map((s) => {
+              const task = reportTask(s, data);
+              return (
+                <div className="lesson-pick-row" key={s.id}>
+                  <div className="grow">
+                    <strong>{s.name}</strong>
+                    <small>
+                      {task.label}
+                      {task.dueDate ? " · " + task.dueDate : ""}
+                    </small>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      setView((v) => ({
+                        ...v,
+                        selected: s.id,
+                        course: "",
+                        tab: "reports",
+                      }));
+                      setModal(null);
+                    }}
+                  >
+                    制作与查看报告
+                  </Button>
+                </div>
+              );
+            })}
+        </Modal>
+      )}
       {modal === "lessons" && student && (
         <LessonPicker student={student} onClose={() => setModal(null)} />
+      )}
+      {modal === "examCourse" && student && (
+        <ExamCoursePicker
+          student={student}
+          onClose={() => setModal(null)}
+          onAdded={(courseId) => {
+            setView((v) => ({ ...v, course: courseId, tab: "overview" }));
+            setModal(null);
+          }}
+        />
       )}
       {modal === "manage" && student && (
         <Modal title="学生管理操作" onClose={() => setModal(null)}>
@@ -924,7 +1085,7 @@ export default function Students({ navigate }) {
             disabled={directoryState !== "available"}
             onClick={() => setModal("delete")}
           >
-            删除学生及本地目录
+            移入学生回收站
           </Button>
         </Modal>
       )}
@@ -933,7 +1094,7 @@ export default function Students({ navigate }) {
           title="删除学生"
           name={student.name}
           description={
-            "学生目录将移入系统废纸篓；同时清除该学生的档案、作业、反馈、回访、笔记、错题、考试成绩与报告索引。讲义库原件保留。目录：" +
+            "学生目录和关联档案、授课、作业、反馈、回访、笔记、错题、考试成绩与报告将一并保存在应用回收站，可完整恢复。讲义库原件保留。目录：" +
             student.directoryPath
           }
           onClose={() => setModal(null)}
@@ -945,24 +1106,13 @@ export default function Students({ navigate }) {
       )}
       {modal?.removeRef && (
         <Confirm
-          title="移除讲义引用"
-          description="只移除学生与讲义的关系，讲义库原件保留。被课堂反馈使用的引用需要先处理反馈。"
+          title={modal.removeRef.isExam ? "移除考试课程引用" : "移除讲义引用"}
+          description="只移除课程引用关系，讲义、考试及原文件保留。被课堂反馈使用的引用需要先处理反馈。"
           onClose={() => setModal(null)}
           onConfirm={() =>
-            mutate((d) => {
-              const remaining = removeRef(
-                d.refs.filter((r) => r.studentId === student.id),
-                modal.removeRef.id,
-                d.feedback.filter((f) => f.studentId === student.id),
-              );
-              return {
-                ...d,
-                refs: [
-                  ...d.refs.filter((r) => r.studentId !== student.id),
-                  ...remaining,
-                ],
-              };
-            })
+            mutate((d) =>
+              removeCourseReference(d, student.id, modal.removeRef.id),
+            )
           }
         />
       )}

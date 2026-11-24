@@ -3,11 +3,14 @@ import { useApp, useView } from "./store";
 import { services, basename } from "./services";
 import { SPECIAL_DIRS, id } from "./domain";
 import { isWithinRoot, studentDirectoryState } from "./paths";
+import { examReferenceCourse } from "./examReferences";
 export function useFiles(path, recursive = false) {
   const [files, setFiles] = useState([]),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(false),
-    [tick, setTick] = useState(0);
+    [tick, setTick] = useState(0),
+    [finishedRead, setFinishedRead] = useState("");
+  const readKey = JSON.stringify([path || "", recursive, tick]);
   useEffect(() => {
     let live = true;
     setFiles([]);
@@ -21,12 +24,22 @@ export function useFiles(path, recursive = false) {
       .list(path, recursive)
       .then((v) => live && setFiles(v))
       .catch((e) => live && setError(e.message))
-      .finally(() => live && setLoading(false));
+      .finally(() => {
+        if (live) {
+          setLoading(false);
+          setFinishedRead(readKey);
+        }
+      });
     return () => {
       live = false;
     };
   }, [path, recursive, tick]);
-  return { files, error, loading, refresh: () => setTick((v) => v + 1) };
+  return {
+    files,
+    error,
+    loading: !!path && (loading || finishedRead !== readKey),
+    refresh: () => setTick((v) => v + 1),
+  };
 }
 export function useCourses(student) {
   const { data, config } = useApp();
@@ -39,6 +52,8 @@ export function useCourses(student) {
   const refs = data.refs
     .filter((r) => r.studentId === student?.id)
     .map((r) => {
+      if (r.type === "exam")
+        return examReferenceCourse(data, r, config.examsRoot);
       const lesson = data.lessons.find((l) => l.id === r.lessonId);
       return lesson
         ? {

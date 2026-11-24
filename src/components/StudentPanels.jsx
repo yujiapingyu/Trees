@@ -1,4 +1,22 @@
-import React, { useEffect, useState } from "react";
+import AutomaticFeedbackDrafts from "./AutomaticFeedbackDrafts";
+import { saveFeedbackWithStyle } from "../shared/lessonCloseout";
+import { feedbackStylePrompt } from "../shared/feedbackStyle";
+import { curriculumContext } from "../shared/zhejiangCurriculum";
+import { enrichPlanningSnapshot } from "../shared/planningContext";
+import { freshReport, reportSnapshot } from "../shared/reports";
+import {
+  learningPlanPrompt,
+  validateCoursePlan,
+  PLAN_FORMAT,
+} from "../shared/learningPlan";
+import { useDraft } from "../shared/drafts";
+import {
+  latestProgress,
+  analysisSources,
+  changedSources,
+  SOURCE_LABELS,
+} from "../shared/teaching";
+import React, { useEffect, useState, useRef } from "react";
 import {
   Plus,
   Trash2,
@@ -47,7 +65,7 @@ import { readLessonDocuments } from "../shared/documents";
 import {
   feedbackDate,
   feedbackPrompt,
-  formatFeedback,
+  generateFeedbackDraft,
   localFeedback,
 } from "../shared/feedback";
 export function HomeworkPanel({ student }) {
@@ -108,7 +126,11 @@ export function HomeworkPanel({ student }) {
         />
       ) : (
         items.map((h) => (
-          <div className="homework-row" key={h.id}>
+          <div
+            className="homework-row"
+            key={h.id}
+            data-search-key={"作业:" + h.id}
+          >
             <button
               className={"checkbox " + (h.completed ? "checked" : "")}
               aria-label={h.completed ? "标记未完成" : "标记已完成"}
@@ -185,6 +207,7 @@ export function HomeworkPanel({ student }) {
       {picker && (
         <ResourcePicker
           title={picker === "new" ? "选择作业" : "选择参考答案"}
+          student={student}
           onClose={() => setPicker(null)}
           onSelect={(f) => run(() => pick(f))}
         />
@@ -207,15 +230,25 @@ export function HomeworkPanel({ student }) {
 }
 export function FeedbackPanel({ student, courses, course }) {
   const { data, config, mutate, run } = useApp();
-  const [lessonId, setLesson] = useState(course?.id || ""),
-    [classDate, setClassDate] = useState(today()),
-    [input, setInput] = useState(""),
-    [draft, setDraft] = useState(""),
-    [model, setModel] = useState(""),
-    [editing, setEditing] = useState(null),
-    [remove, setRemove] = useState(null),
-    [generating, setGenerating] = useState(false),
-    [sourceFiles, setSourceFiles] = useState([]);
+  const draftKey = "feedback:" + student.id + ":" + (course?.id || "general");
+  const [lessonId, setLesson] = useDraft(
+    draftKey + ":lesson",
+    course?.id || "",
+  );
+  const [classDate, setClassDate] = useDraft(draftKey + ":date", today);
+  const [input, setInput] = useDraft(draftKey + ":notes", "");
+  const [draft, setDraft] = useDraft(draftKey + ":text", "");
+  const [model, setModel] = useDraft(draftKey + ":model", "");
+  const [generatedOriginal, setGeneratedOriginal] = useDraft(
+    draftKey + ":generated-original",
+    "",
+  );
+  const [editing, setEditing] = useDraft(draftKey + ":editing", null);
+  const [scope, setScope] = useDraft(draftKey + ":scope", "");
+  const [sessionId, setSessionId] = useDraft(draftKey + ":session", "");
+  const [sourceFiles, setSourceFiles] = useDraft(draftKey + ":sources", []);
+  const [remove, setRemove] = useState(null),
+    [generating, setGenerating] = useState(false);
   const stopped = student.status === "已停课";
   const history = data.feedback
     .filter((f) => f.studentId === student.id)
@@ -229,28 +262,32 @@ export function FeedbackPanel({ student, courses, course }) {
         feedbackDate(classDate);
         if (!input.trim()) throw Error("请先输入本节课记录");
         const lesson = courses.find((c) => c.id === lessonId);
-        if (!lesson) throw Error("请选择关联讲义，AI 将从讲义正文提取授课内容");
+        if (!lesson)
+          throw Error("请选择关联讲义或试卷，AI 将从正文提取授课内容");
         const documents = await readLessonDocuments(lesson);
         const template = config.feedbackTemplate
           ? await services.readText(config.feedbackTemplate)
           : "";
-        const result = await generate(
-          feedbackPrompt({
+        const result = await generateFeedbackDraft({
+          prompt: feedbackPrompt({
             student,
             date: classDate,
             notes: input,
+            scope,
             lesson,
             documents,
             template,
             school: schoolNameForStudent(student, data),
+            style: feedbackStylePrompt(data.feedbackStyle),
           }),
-          { json: true },
-        );
-        const text = formatFeedback(parseJSONResult(result.text), {
           student,
           date: classDate,
+          subject: lesson.subjectName,
+          style: data.feedbackStyle,
+          request: (task) => generate(task, { json: true }),
         });
-        setDraft(text);
+        setDraft(result.feedback);
+        setGeneratedOriginal(result.feedback);
         setModel(result.model);
         setSourceFiles(documents.map(({ path, name }) => ({ path, name })));
       } finally {
@@ -260,8 +297,93 @@ export function FeedbackPanel({ student, courses, course }) {
   return (
     <Section
       title="课堂反馈"
-      subtitle="日期默认今天；AI 从讲义提取授课内容，结合教师记录扩写家长反馈"
+      subtitle="未提交内容自动保存；AI 仅围绕实际授课范围扩写反馈"
     >
+      <AutomaticFeedbackDrafts
+        student={student}
+        disabled={generating}
+        onAdopt={(s) => {
+          if (
+            draft.trim() &&
+            !window.confirm("编辑框已有未保存的草稿，是否换成这份自动反馈？")
+          )
+            return;
+          setDraft(s.closeout.feedbackDraft.content);
+          setGeneratedOriginal(
+            s.closeout.feedbackDraft.generatedOriginal || "",
+          );
+          setModel(s.closeout.feedbackDraft.model);
+          setInput(s.closeout.raw);
+          setScope(s.scope || s.topic);
+          setSessionId(s.id);
+          setClassDate(s.date);
+          setLesson(s.courseId || "");
+          setSourceFiles(s.closeout.feedbackDraft.sourceFiles || []);
+          setEditing(s.closeout.supersedesFeedbackId || null);
+        }}
+      />
+      {!!data.feedbackStyle?.learnedCount && (
+        <p className="form-hint">
+          已从你保存的 {data.feedbackStyle.learnedCount}{" "}
+          次反馈修改中学习表达习惯，后续生成会自动参考。
+        </p>
+      )}
+      <Field label="关联本次授课记录（可选）">
+        <select
+          aria-label="关联本次授课记录"
+          value={sessionId}
+          disabled={stopped || generating}
+          onChange={(e) => {
+            setSessionId(e.target.value);
+            const s = (data.sessions || []).find(
+              (s) => s.id === e.target.value,
+            );
+            if (s) {
+              setClassDate(s.date);
+              setScope(s.scope || s.topic);
+              setInput(s.notes || "");
+              setLesson(s.courseId || "");
+            }
+          }}
+        >
+          <option value="">不关联，手动填写</option>
+          {(data.sessions || [])
+            .filter(
+              (s) => s.studentId === student.id && s.status === "completed",
+            )
+            .sort((a, b) => b.date.localeCompare(a.date))
+            .map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.date} · {s.topic}
+              </option>
+            ))}
+        </select>
+      </Field>
+      <Field label="本次实际讲授范围">
+        <textarea
+          aria-label="本次实际讲授范围"
+          value={scope}
+          disabled={stopped || generating}
+          onChange={(e) => setScope(e.target.value)}
+          placeholder="例如：第2–4页，第3–8题；只讲对数定义，未讲换底公式。留空时只按教师记录判断，不默认整份讲完。"
+        />
+      </Field>
+      <Button
+        disabled={generating || stopped}
+        onClick={() => {
+          setInput("");
+          setDraft("");
+          setGeneratedOriginal("");
+          setModel("");
+          setEditing(null);
+          setScope("");
+          setSessionId("");
+          setSourceFiles([]);
+          setClassDate(today());
+        }}
+      >
+        清空未提交反馈草稿
+      </Button>
       <div className="form-grid two">
         <Field label="上课日期">
           <input
@@ -293,7 +415,7 @@ export function FeedbackPanel({ student, courses, course }) {
           value={input}
           disabled={stopped || generating}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="填写你观察到的表现、优点、薄弱点和建议。AI 将结合讲义正文，扩写为优点和不足各 2–3 条。"
+          placeholder="简单记下孩子本节课学得怎样，例如：能复述定义，但计算时容易漏条件。AI 会据此展开学生表现，讲义只用于提取授课内容和提出巩固建议，不用填写完整反馈。"
         />
       </Field>
       <div className="button-row">
@@ -310,8 +432,14 @@ export function FeedbackPanel({ student, courses, course }) {
           onClick={() =>
             run(async () => {
               setDraft(
-                localFeedback({ student, date: classDate, notes: input }),
+                localFeedback({
+                  student,
+                  date: classDate,
+                  notes: input,
+                  subject: courses.find((c) => c.id === lessonId)?.subjectName,
+                }),
               );
+              setGeneratedOriginal("");
               setModel("本地模板 / 非 AI 生成");
               setSourceFiles([]);
             })
@@ -330,7 +458,12 @@ export function FeedbackPanel({ student, courses, course }) {
               授课内容来源：{sourceFiles.map((f) => f.name).join("、")}
             </p>
           )}
-          <Editor value={draft} onChange={setDraft} rows={16} />
+          <Editor
+            aria-label="家长反馈正文"
+            value={draft}
+            onChange={setDraft}
+            rows={16}
+          />
           <div className="button-row">
             <CopyButton text={draft} />
             <Button
@@ -346,21 +479,21 @@ export function FeedbackPanel({ student, courses, course }) {
                     lessonId,
                     date: classDate,
                     teacherNotes: input,
+                    scope,
+                    sessionId,
                     sourceFiles,
                     model,
                   };
-                  await mutate((d) => ({
-                    ...d,
-                    feedback: editing
-                      ? d.feedback.map((f) =>
-                          f.id === editing ? { ...f, ...values } : f,
-                        )
-                      : [
-                          ...d.feedback,
-                          { id: id(), studentId: student.id, ...values },
-                        ],
-                  }));
+                  await mutate((d) =>
+                    saveFeedbackWithStyle(d, {
+                      ...values,
+                      studentId: student.id,
+                      feedbackId: editing,
+                      generatedOriginal,
+                    }),
+                  );
                   setDraft("");
+                  setGeneratedOriginal("");
                   setEditing(null);
                   setSourceFiles([]);
                 }, "反馈已保存")
@@ -378,7 +511,11 @@ export function FeedbackPanel({ student, courses, course }) {
         <Empty icon={FileText} title="还没有保存的课堂反馈" />
       ) : (
         history.map((f) => (
-          <details className="record-card" key={f.id}>
+          <details
+            className="record-card"
+            key={f.id}
+            data-search-key={"反馈:" + f.id}
+          >
             <summary>
               <span>
                 {f.date} ·{" "}
@@ -394,9 +531,12 @@ export function FeedbackPanel({ student, courses, course }) {
                 onClick={() => {
                   setEditing(f.id);
                   setDraft(f.content);
+                  setGeneratedOriginal(f.generatedOriginal || "");
                   setLesson(f.lessonId || "");
                   setClassDate(f.date || today());
                   setInput(f.teacherNotes || "");
+                  setScope(f.scope || "");
+                  setSessionId(f.sessionId || "");
                   setSourceFiles(f.sourceFiles || []);
                   setModel(f.model || "已保存反馈");
                 }}
@@ -483,12 +623,10 @@ export function WrongPanel({ student, course, range = "all", recentN = 5 }) {
                 run(async () => {
                   setImporting(true);
                   try {
-                    const files = await services.list(course.path, true);
-                    const doc = files.find((f) =>
-                      /\.(docx|doc|txt|md)$/i.test(f.name),
-                    );
-                    if (!doc) throw Error("当前讲义中未找到可提取的文档");
-                    const text = await services.readText(doc.path);
+                    const documents = await readLessonDocuments(course);
+                    const text = documents
+                      .map((d) => `${d.name}\n${d.text}`)
+                      .join("\n\n");
                     const result = await generate(
                       "从以下讲义提取题目。只输出 JSON 数组，每项包含 stem, options, answer, explanation, difficulty（基础/中等/较难）,tags。未知答案留空，不编造。\n" +
                         text,
@@ -530,7 +668,11 @@ export function WrongPanel({ student, course, range = "all", recentN = 5 }) {
         />
       ) : (
         items.map((q, i) => (
-          <div className="question-card" key={q.id}>
+          <div
+            className="question-card"
+            key={q.id}
+            data-search-key={"错题:" + q.id}
+          >
             <div className="question-head">
               <span className="question-number">
                 {String(i + 1).padStart(2, "0")}
@@ -661,157 +803,11 @@ export function WrongPanel({ student, course, range = "all", recentN = 5 }) {
     </Section>
   );
 }
-export function ReportPanel({ student }) {
+export { default as ReportPanel } from "./LearningReports";
+export function AnalysisPanel({ student, courses = [] }) {
   const { data, config, mutate, run } = useApp();
-  const directoryAvailable =
-    studentDirectoryState(student, config.studentsRoot) === "available";
-  const [form, setForm] = useState({
-      type: "入学报告",
-      subject: "数学",
-      school: schoolNameForStudent(student, data),
-      score: "",
-      target: "",
-      targetSchool: "",
-      requirements: "",
-    }),
-    [draft, setDraft] = useState(""),
-    [model, setModel] = useState("");
-  const history = data.reports.filter((r) => r.studentId === student.id);
-  const { files: reportFiles, error: reportError } = useFiles(
-    directoryAvailable ? join(student.directoryPath, "学习力报告") : undefined,
-    true,
-  );
-  const externalReports = reportFiles.filter(
-    (f) =>
-      !f.isDirectory &&
-      !history.some((r) => r.path === f.path) &&
-      !f.name.endsWith(".bak"),
-  );
-  return (
-    <Section title="学习力报告" subtitle="以真实记录为依据，保留每一次成长回顾">
-      <div className="form-grid two">
-        {[
-          ["type", "报告类型"],
-          ["subject", "学科"],
-          ["school", "学校"],
-          ["score", "当前成绩"],
-          ["target", "目标分数 / 排名"],
-          ["targetSchool", "目标学校"],
-        ].map(([k, l]) => (
-          <Field key={k} label={l}>
-            {k === "type" ? (
-              <select
-                value={form.type}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, type: e.target.value }))
-                }
-              >
-                <option>入学报告</option>
-                <option>阶段报告</option>
-              </select>
-            ) : (
-              <input
-                value={form[k]}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, [k]: e.target.value }))
-                }
-              />
-            )}
-          </Field>
-        ))}
-      </div>
-      <Field label="补充要求">
-        <textarea
-          value={form.requirements}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, requirements: e.target.value }))
-          }
-        />
-      </Field>
-      <AIAction
-        disabled={student.status === "已停课"}
-        label="生成报告草稿"
-        task={() =>
-          `生成${form.type}，未知信息标注待确认。输入：${JSON.stringify(form)}\n学生事实：${JSON.stringify(safeStudentContext(student, data))}`
-        }
-        onResult={(v, m) => {
-          setDraft(v);
-          setModel(m);
-        }}
-      />
-      {draft && (
-        <>
-          <Editor value={draft} onChange={setDraft} />
-          <div className="button-row">
-            <CopyButton text={draft} />
-            <Button
-              variant="primary"
-              disabled={!directoryAvailable}
-              onClick={() =>
-                run(async () => {
-                  const path = join(
-                    student.directoryPath,
-                    "学习力报告",
-                    `${today()}_${form.type}_${id().slice(0, 6)}.docx`,
-                  );
-                  await services.word(path, draft);
-                  await mutate((d) => ({
-                    ...d,
-                    reports: [
-                      ...d.reports,
-                      {
-                        id: id(),
-                        studentId: student.id,
-                        type: form.type,
-                        generatedAt: new Date().toISOString(),
-                        content: draft,
-                        path,
-                        model,
-                        sourceSnapshot: safeStudentContext(student, data),
-                      },
-                    ],
-                  }));
-                  setDraft("");
-                }, "报告已保存到学生学习力报告目录")
-              }
-            >
-              保存 Word 报告
-            </Button>
-          </div>
-        </>
-      )}
-      <h4 className="subheading">报告历史</h4>
-      {reportError && !reportError.includes("ENOENT") && (
-        <ErrorBox message={reportError} />
-      )}
-      {externalReports.map((f) => (
-        <FileItem
-          key={f.path}
-          file={f}
-          onOpen={() => run(() => services.open(f.path))}
-        />
-      ))}
-      {!history.length && !externalReports.length ? (
-        <Empty icon={FileText} title="还没有学习报告" />
-      ) : (
-        history.map((r) => (
-          <FileItem
-            key={r.id}
-            file={{
-              name: r.type + " · " + r.generatedAt.slice(0, 10),
-              path: r.path,
-            }}
-            onOpen={() => run(() => services.open(r.path))}
-          />
-        ))
-      )}
-    </Section>
-  );
-}
-export function AnalysisPanel({ student }) {
-  const { data, mutate, run } = useApp();
-  const [type, setType] = useState("学情分析"),
-    [hours, setHours] = useState(20);
+  const [type, setType] = useState("学情分析");
+  const generation = useRef(null);
   const cache = data.analysis[student.id + ":" + type];
   return (
     <Section
@@ -823,18 +819,19 @@ export function AnalysisPanel({ student }) {
         onChange={setType}
         items={["学情分析", "续费清单", "课程规划"]}
       />
-      {type !== "学情分析" && (
-        <Field label="规划总课时（每次课 2 课时，2–200 的偶数）">
-          <input
-            type="number"
-            min="2"
-            max="200"
-            step="2"
-            value={hours}
-            onChange={(e) => setHours(+e.target.value)}
-          />
-        </Field>
-      )}
+      <p className="form-hint">
+        课程规划和续费清单统一为后续15次授课，采用与学习力报告相同的教材及进度规则；每次课的实际分钟数另行登记。
+      </p>
+      {cache &&
+        changedSources(cache.sourceSnapshot, student, data).length > 0 && (
+          <div role="status" className="info-banner">
+            分析需要更新：
+            {changedSources(cache.sourceSnapshot, student, data)
+              .map((k) => SOURCE_LABELS[k] || k)
+              .join("、")}
+            已变化。旧结果保留，可重新生成。
+          </div>
+        )}
       <div className="analysis-sources">
         {[
           ["refs", "讲义"],
@@ -852,52 +849,40 @@ export function AnalysisPanel({ student }) {
       </div>
       <AIAction
         label={cache ? "重新生成" : "生成" + type}
-        task={() => {
-          if (
-            type !== "学情分析" &&
-            (!Number.isInteger(hours) || hours < 2 || hours > 200 || hours % 2)
-          )
-            throw Error("课时必须为 2–200 的偶数");
-          return `${type === "学情分析" ? "输出学生总评、关键问题、趋势变化、下一步建议。" : `生成数学${type}，仅输出 JSON 数组，每项 lessonNumber（从1开始）,topic,goal,focus,homework,hours（必须为2）。必须恰好 ${hours / 2} 项，总课时 ${hours}，禁止编造价格。`}只基于提供数据，缺失标注待确认。\n${JSON.stringify(safeStudentContext(student, data))}`;
+        task={async () => {
+          generation.current = analysisSources(student, data);
+          if (type === "学情分析")
+            return `输出学生总评、关键问题、趋势变化、下一步建议。以最近实际日期的授课记录和教师原始观察为主，只基于事实，不编造表现；缺失标注待确认。\n${JSON.stringify({ ...safeStudentContext(student, data), regionalCurriculum: curriculumContext(student, data) })}`;
+          const report = freshReport(student, data, "stage");
+          const latest = latestProgress(student.id, data);
+          report.currentProgressOverride = latest
+            ? `${latest.date}实际授课：${latest.topic}；实际范围：${latest.scope || ""}；下次继续：${latest.nextProgress || "按当前进度继续"}`
+            : "";
+          const snapshot = await enrichPlanningSnapshot(
+            reportSnapshot(report, data),
+            report,
+            data,
+            courses,
+            config,
+          );
+          return learningPlanPrompt(report, snapshot);
         }}
         extra={{ json: type !== "学情分析" }}
         onResult={(raw, model) => {
-          let content = raw;
+          let content = raw,
+            planData = null;
           if (type !== "学情分析") {
-            const plan = parseJSONResult(raw);
-            if (
-              !Array.isArray(plan) ||
-              plan.length !== hours / 2 ||
-              new Set(plan.map((p) => p.lessonNumber)).size !== hours / 2 ||
-              plan.some(
-                (p, i) =>
-                  p.hours !== 2 ||
-                  p.lessonNumber !== i + 1 ||
-                  !p.topic ||
-                  !p.goal,
-              )
-            )
-              throw Error(
-                "课程规划的课次、课时或必需字段不符合约束，未保存，请重试",
-              );
+            planData = validateCoursePlan(parseJSONResult(raw), {
+              meta: { grade: student.grade },
+            });
             content =
-              type === "续费清单"
-                ? [
-                    "课次\t课程主题\t课时\t教学目标",
-                    ...plan.map((p) =>
-                      [p.lessonNumber, p.topic, 2, p.goal]
-                        .map((v) => String(v).replace(/[\t\n]/g, " "))
-                        .join("\t"),
-                    ),
-                    `合计\t${plan.length}次课\t${hours}课时`,
-                  ].join("\n")
-                : `# ${student.name} · 数学课程规划\n\n共 ${plan.length} 次课，每次 2 课时，总计 ${hours} 课时。\n\n` +
-                  plan
-                    .map(
-                      (p) =>
-                        `## 第${p.lessonNumber}次课：${p.topic}\n\n教学目标：${p.goal}\n\n重点：${p.focus || "待确认"}\n\n作业：${p.homework || "待确认"}`,
-                    )
-                    .join("\n\n");
+              `# ${student.name} · ${type}\n\n${planData.curriculum.edition} · ${planData.curriculum.currentTopic}\n\n${planData.planningNotes}\n\n` +
+              planData.plan
+                .map(
+                  (p, i) =>
+                    `## 第${i + 1}次课：${p.topic}\n目标：${p.objectives}\n重难点：${p.keyPoints}`,
+                )
+                .join("\n\n");
           }
           return mutate((d) => ({
             ...d,
@@ -906,7 +891,19 @@ export function AnalysisPanel({ student }) {
               [student.id + ":" + type]: {
                 content,
                 model,
+                planData,
+                sourceSnapshot: generation.current,
                 updatedAt: new Date().toISOString(),
+                history: cache
+                  ? [
+                      {
+                        content: cache.content,
+                        updatedAt: cache.updatedAt,
+                        model: cache.model,
+                      },
+                      ...(cache.history || []),
+                    ].slice(0, 5)
+                  : [],
               },
             },
           }));
@@ -922,6 +919,17 @@ export function AnalysisPanel({ student }) {
             <CopyButton text={cache.content} />
           </div>
           <Markdown>{cache.content}</Markdown>
+          {!!cache.history?.length && (
+            <details>
+              <summary>上次分析版本（{cache.history.length}）</summary>
+              {cache.history.map((v, i) => (
+                <article className="record-card" key={i}>
+                  <small>{new Date(v.updatedAt).toLocaleString("zh-CN")}</small>
+                  <Markdown>{v.content}</Markdown>
+                </article>
+              ))}
+            </details>
+          )}
         </>
       ) : (
         <Empty

@@ -1,3 +1,4 @@
+import CurriculumProgress from "../components/CurriculumProgress";
 import React, { useEffect, useState } from "react";
 import {
   Settings2,
@@ -14,10 +15,13 @@ import {
   FolderTree,
   Info,
   RefreshCw,
+  Keyboard,
 } from "lucide-react";
 import { useApp, useView } from "../shared/store";
 import { services } from "../shared/services";
 import SchoolManager from "../components/SchoolManager";
+import DesktopSettings from "../components/DesktopSettings";
+import StorageSettings from "../components/StorageSettings";
 import {
   PageHeader,
   Button,
@@ -27,6 +31,28 @@ import {
   Markdown,
 } from "../components/UI";
 export const PATH_GROUPS = [
+  {
+    key: "curriculum",
+    label: "浙江教材与进度",
+    icon: BookOpen,
+    description:
+      "自动匹配教材与教学起点，直接生成后续15节课，无需维护学校进度表",
+    fields: [],
+  },
+  {
+    key: "storage",
+    label: "数据与备份",
+    icon: HardDrive,
+    description: "SQLite 数据库、保存位置与恢复",
+    fields: [],
+  },
+  {
+    key: "desktop",
+    label: "启动与快捷键",
+    icon: Keyboard,
+    description: "独立应用、菜单栏驻留与全局唤起",
+    fields: [],
+  },
   {
     key: "student",
     label: "学生与讲义",
@@ -121,6 +147,11 @@ export default function Settings() {
     [shown, setShown] = useState({}),
     [busy, setBusy] = useState(false),
     [volumes, setVolumes] = useState([]);
+  useEffect(() => {
+    const handler = () => setTab("storage");
+    window.addEventListener("storage:settings", handler);
+    return () => window.removeEventListener("storage:settings", handler);
+  }, []);
   useEffect(() => setDraft({ ...defaults, ...config }), [config]);
   const group = PATH_GROUPS.find((g) => g.key === tab) || PATH_GROUPS[0];
   useEffect(() => {
@@ -165,7 +196,13 @@ export default function Settings() {
             <h2>{group.label}</h2>
             <p>{group.description}</p>
           </div>
-          {group.key === "schools" ? (
+          {group.key === "curriculum" ? (
+            <CurriculumProgress />
+          ) : group.key === "storage" ? (
+            <StorageSettings />
+          ) : group.key === "desktop" ? (
+            <DesktopSettings />
+          ) : group.key === "schools" ? (
             <SchoolManager />
           ) : group.key === "guide" ? (
             <Markdown>{`### 建议目录结构
@@ -180,7 +217,7 @@ export default function Settings() {
 
 学校在“学校管理”中按初中、高中自行添加，再在学生档案选择关联。
 
-浏览器可保存轻量记录；本地文件、DeepSeek 请求及文档转换需要桌面版。使用 npm run desktop 启动。`}</Markdown>
+浏览器可保存轻量记录；本地文件、DeepSeek 请求及文档转换需要桌面版。双击已安装的「知序」应用即可启动。`}</Markdown>
           ) : (
             <>
               <div className="settings-fields">

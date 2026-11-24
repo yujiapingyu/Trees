@@ -22,6 +22,9 @@ test("摘要整理提示词限定九项和当前摘要，不补造家长对方�
   }
   assert.match(prompt, /不代表家长已认可/);
   assert.match(prompt, /空字符串/);
+  assert.match(prompt, /教师第一人称/);
+  assert.match(prompt, /可执行的步骤/);
+  assert.match(prompt, /不能把推测写成/);
   assert.match(prompt, /每天拖到九点/);
   assert.throws(() => followupSummaryPrompt("  "), /先输入/);
   assert.throws(() => followupSummaryPrompt("a".repeat(30001)), /过长/);

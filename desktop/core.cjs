@@ -90,6 +90,8 @@ class FileService {
     if (typeof file !== "string" || !path.isAbsolute(file))
       throw Error("请先配置有效的绝对路径");
     const target = await canonical(file);
+    if (write && this.storage.isProtectedPath?.(target))
+      throw Error("数据库和本机设置受保护，请通过「数据与备份」管理。");
     const roots = await this.roots();
     const root = roots.find((r) => within(r, target));
     if (
@@ -238,7 +240,14 @@ class AIProvider {
   cancel(id) {
     this.tasks.get(id)?.abort();
   }
-  async generate({ id, task, messages, json = false }) {
+  async generate({ id, task, messages, json = false, maxTokens, thinking }) {
+    if (thinking !== undefined && typeof thinking !== "boolean")
+      throw Error("生成模式设置无效");
+    if (
+      maxTokens !== undefined &&
+      (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 16384)
+    )
+      throw Error("生成长度设置无效");
     const c = this.storage.get("sm_path_config_v1", {}),
       key = c.deepseekKey;
     if (!key) throw Error("请先在配置中心设置 DeepSeek API Key");
@@ -255,7 +264,7 @@ class AIProvider {
         {
           role: "system",
           content:
-            "你是教师的教学助手。只依据当前任务提供的事实作答，不得编造学生表现、文件内容或题目答案。未知标注待确认。不确定识别应标记 uncertain。输出中文。" +
+            "你是教师的教学助手。只依据当前任务提供的事实作答，不得编造学生表现、文件内容或题目答案。可按任务要求补充明确表述为建议的做法和关注点，但不能把建议或推测写成已发生的事实。缺失信息按当前任务约定处理；未约定时标注待确认。不确定识别应标记 uncertain。输出中文。" +
             (json ? "仅输出有效 JSON。" : ""),
         },
         ...(messages || [{ role: "user", content: task }]),
@@ -266,7 +275,22 @@ class AIProvider {
           Authorization: `Bearer ${key}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ model, messages: msgs, temperature: 0.3 }),
+        body: JSON.stringify({
+          model,
+          messages: msgs,
+          temperature: 0.3,
+          ...(maxTokens
+            ? {
+                max_tokens: /^(deepseek-chat|deepseek-coder)$/.test(model)
+                  ? Math.min(maxTokens, 8192)
+                  : maxTokens,
+              }
+            : {}),
+          ...(thinking !== undefined &&
+          /deepseek-(v4|flash|reasoner)/.test(model)
+            ? { thinking: { type: thinking ? "enabled" : "disabled" } }
+            : {}),
+        }),
         signal: ctrl.signal,
       });
       if (!res.ok)
@@ -274,6 +298,10 @@ class AIProvider {
           `模型请求失败 HTTP ${res.status}：${(await res.text()).slice(0, 500)}`,
         );
       const data = await res.json();
+      if (data.choices?.[0]?.finish_reason === "length")
+        throw Error(
+          "生成内容超过长度限制，未替换原草稿。请缩小报告统计周期后重试",
+        );
       const text = data.choices?.[0]?.message?.content;
       if (typeof text !== "string" || !text.trim())
         throw Error("模型返回空内容或格式异常");
@@ -376,6 +404,11 @@ class DocumentService {
     );
     return this.files.write(file, buffer, { overwrite, backup: overwrite });
   }
+  async learningReport(file, report) {
+    if (!/\.docx$/i.test(file)) throw Error("学习力报告请保存为 DOCX 文件");
+    const { learningReportBuffer } = require("./learningReport.cjs");
+    return this.files.write(file, await learningReportBuffer(report));
+  }
   async pdf(file) {
     const p = await this.files.guard(file);
     if (/\.pdf$/i.test(p))
@@ -403,50 +436,16 @@ class DocumentService {
       await fs.rm(dir, { recursive: true, force: true });
     }
   }
-  async study(from, to, factor, exponent, overwrite = false) {
-    if (!(factor >= 0.1 && factor <= 1.5 && exponent >= 0.5 && exponent <= 1))
-      throw Error("学案空白参数超出范围");
-    if (!/\.docx$/i.test(from))
-      throw Error("保留版式转换仅支持 DOCX，请先将 DOC 另存为 DOCX");
-    const JSZip = require("jszip");
-    const zip = await JSZip.loadAsync(await this.files.read(from));
-    const part = zip.file("word/document.xml");
-    if (!part) throw Error("DOCX 缺少正文");
-    let xml = await part.async("string");
-    let count = 0;
-    xml = xml.replace(/<w:p[ >][\s\S]*?<\/w:p>/g, (p) => {
-      const text = p.replace(/<[^>]*>/g, "");
-      if (/^(?:【?(?:答案|解析|解答)】?[：:])/.test(text.trim())) return "";
-      if (/^\s*(?:\d+[.、．]|[（(]\d+[)）])/.test(text)) {
-        count++;
-        const blanks = Math.min(
-          12,
-          Math.max(
-            1,
-            Math.round(factor * Math.pow(text.length / 30, exponent) * 3),
-          ),
-        );
-        return (
-          p +
-          '<w:p><w:r><w:t xml:space="preserve"> </w:t></w:r></w:p>'.repeat(
-            blanks,
-          )
-        );
-      }
-      return p;
-    });
-    if (!count) throw Error("未识别到编号题目，未写入文件。请检查教案题目编号");
-    zip.file("word/document.xml", xml);
-    await this.files.write(
+  async study(from, to, factor, exponent, overwrite = false, mode = "process") {
+    const { LessonDocumentService } = require("./lessonDocuments.cjs");
+    return new LessonDocumentService(this.files).study(
+      from,
       to,
-      await zip.generateAsync({ type: "nodebuffer" }),
-      { overwrite, backup: overwrite },
+      factor,
+      exponent,
+      overwrite,
+      mode,
     );
-    return {
-      path: to,
-      questions: count,
-      layout: "保留原 DOCX 结构，已插入作答空白；请人工复核分页与答案残留",
-    };
   }
 }
 module.exports = {

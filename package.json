@@ -1,6 +1,6 @@
 {
   "name": "teaching-workspace",
-  "version": "1.0.0",
+  "version": "1.10.1",
   "private": true,
   "type": "module",
   "main": "desktop/main.cjs",
@@ -10,11 +10,15 @@
     "preview": "vite preview --host 127.0.0.1",
     "desktop": "npm run build && electron .",
     "desktop:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env TEACHING_DEV=1 electron .\"",
+    "package:mac": "npm run build && node scripts/make-icons.mjs && node scripts/package-mac.mjs",
+    "install:mac": "npm run build && node scripts/make-icons.mjs && node scripts/package-mac.mjs --install",
     "test": "node --test tests/*.test.*",
     "test:e2e": "playwright test",
+    "test:packaged": "node scripts/smoke-packaged.mjs",
     "check": "npm run test && npm run build"
   },
   "dependencies": {
+    "@xmldom/xmldom": "^0.8.15",
     "docx": "^9.5.0",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.2",
@@ -31,14 +35,15 @@
     "remark-math": "^6.0.0"
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "@playwright/test": "^1.56.1",
     "@vitejs/plugin-react": "^5.1.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^45.3.3",
+    "prettier": "^3.6.2",
     "vite": "^7.2.0",
-    "wait-on": "^9.0.3",
-    "prettier": "^3.6.2"
+    "wait-on": "^9.0.3"
   },
   "overrides": {
     "katex": "^0.19.1",

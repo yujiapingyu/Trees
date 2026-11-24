@@ -46,7 +46,8 @@ export function AppProvider({ children }) {
     [config, setConfig] = useState({}),
     [loading, setLoading] = useState(true),
     [toast, setToast] = useState(null),
-    [fatal, setFatal] = useState("");
+    [fatal, setFatal] = useState(""),
+    [storageState, setStorageState] = useState(null);
   const current = useRef(data);
   const queue = useRef(Promise.resolve());
   const configRef = useRef(config);
@@ -67,12 +68,17 @@ export function AppProvider({ children }) {
         setData(r.data);
         setConfig(r.config);
         configRef.current = r.config;
+        setStorageState(r.storageState || null);
       })
       .catch((e) => setFatal(e.message))
       .finally(() => setLoading(false));
+    const offStorage = services.onStorageState?.(setStorageState);
     const onError = (e) => notify(e.detail, "danger");
     window.addEventListener("app:error", onError);
-    return () => window.removeEventListener("app:error", onError);
+    return () => {
+      window.removeEventListener("app:error", onError);
+      offStorage?.();
+    };
   }, []);
   useEffect(() => {
     if (toast) {
@@ -80,7 +86,7 @@ export function AppProvider({ children }) {
       return () => clearTimeout(t);
     }
   }, [toast]);
-  const mutate = (fn) => {
+  const mutate = (fn, { quiet = false } = {}) => {
     const operation = async () => {
       const next =
         typeof fn === "function" ? fn(structuredClone(current.current)) : fn;
@@ -90,7 +96,9 @@ export function AppProvider({ children }) {
       return next;
     };
     const p = queue.current.then(operation);
-    queue.current = p.catch((e) => notify(e.message, "danger"));
+    queue.current = p.catch((e) => {
+      if (!quiet) notify(e.message, "danger");
+    });
     return p;
   };
   const run = async (fn, success) => {
@@ -202,29 +210,19 @@ export function AppProvider({ children }) {
         throw e;
       }
     });
-  const deleteStudent = (student) =>
-    studentOperation(async () => {
-      await services.trash(student.directoryPath, student.name);
-      await mutate((d) => {
-        for (const k of [
-          "students",
-          "refs",
-          "homework",
-          "feedback",
-          "notes",
-          "followups",
-          "wrongQuestions",
-          "reports",
-          "examRecords",
-        ])
-          d[k] = d[k].filter((x) =>
-            k === "students" ? x.id !== student.id : x.studentId !== student.id,
-          );
-        for (const k of Object.keys(d.analysis))
-          if (k.startsWith(student.id + ":")) delete d.analysis[k];
-        return d;
+  const studentMove = (method, id) =>
+    studentOperation(() => {
+      const p = queue.current.then(async () => {
+        const next = await services[method](id);
+        current.current = { ...structuredClone(EMPTY_DATA), ...next };
+        setData(current.current);
+        return next;
       });
+      queue.current = p.catch((e) => notify(e.message, "danger"));
+      return p;
     });
+  const deleteStudent = (student) => studentMove("studentArchive", student.id);
+  const restoreStudent = (item) => studentMove("studentRestore", item.id);
   return (
     <Context.Provider
       value={{
@@ -232,6 +230,7 @@ export function AppProvider({ children }) {
         config,
         loading,
         fatal,
+        storageState,
         toast,
         notify,
         run,
@@ -241,6 +240,7 @@ export function AppProvider({ children }) {
         addStudent,
         editStudent,
         deleteStudent,
+        restoreStudent,
         desktop,
       }}
     >

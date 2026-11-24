@@ -137,10 +137,12 @@ test("根目录包含其他配置目录时禁止删除", async (t) => {
 test("AI 成功响应、HTTP 错误、空输出与取消请求均可观测", async (t) => {
   const { store } = await fixture(t);
   const http = require("node:http");
+  let lastRequest;
   const server = http.createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body);
+    lastRequest = request;
     const text = request.messages.at(-1).content;
     if (text === "cancel") return;
     if (text === "fail") {
@@ -153,6 +155,7 @@ test("AI 成功响应、HTTP 错误、空输出与取消请求均可观测", asy
       JSON.stringify({
         choices: [
           {
+            finish_reason: text === "truncated" ? "length" : "stop",
             message: {
               content: text === "empty" ? "" : "已完成真实 HTTP 测试",
             },
@@ -172,8 +175,29 @@ test("AI 成功响应、HTTP 错误、空输出与取消请求均可观测", asy
   });
   const ai = new AIProvider(store);
   assert.equal(
-    (await ai.generate({ id: "ok", task: "ok" })).text,
+    (await ai.generate({ id: "ok", task: "ok", maxTokens: 8192 })).text,
     "已完成真实 HTTP 测试",
+  );
+  assert.equal(lastRequest.max_tokens, 8192);
+  await store.set("sm_path_config_v1", {
+    ...store.get("sm_path_config_v1"),
+    deepseekModel: "deepseek-v4-pro",
+  });
+  await ai.generate({
+    id: "report",
+    task: "ok",
+    maxTokens: 16384,
+    thinking: false,
+  });
+  assert.equal(lastRequest.max_tokens, 16384);
+  assert.equal(lastRequest.thinking.type, "disabled");
+  await assert.rejects(
+    () => ai.generate({ id: "truncated", task: "truncated" }),
+    /超过长度限制/,
+  );
+  await assert.rejects(
+    () => ai.generate({ id: "invalid", task: "ok", maxTokens: -1 }),
+    /长度设置/,
   );
   await assert.rejects(
     () => ai.generate({ id: "fail", task: "fail" }),
